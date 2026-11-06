@@ -3,7 +3,7 @@
 import { useGLTF } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { AdditiveBlending, Bone, Box3, BufferGeometry, Color, CylinderGeometry, DirectionalLight, DoubleSide, Euler, Float32BufferAttribute, Group, Mesh, MeshDepthMaterial, MeshStandardMaterial, PerspectiveCamera, RGBADepthPacking, ShaderMaterial, Vector3 } from "three";
+import { AdditiveBlending, Bone, Box3, BufferGeometry, Color, CylinderGeometry, DirectionalLight, DoubleSide, Euler, Float32BufferAttribute, Group, Mesh, MeshDepthMaterial, MeshStandardMaterial, PerspectiveCamera, Quaternion, RGBADepthPacking, ShaderMaterial, Vector3 } from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { BOOST, CRUISE, flight, stepFlight, type FlightMode } from "./flight";
 import { wingBeatSound } from "./audio";
@@ -274,14 +274,27 @@ const wingNow = { hz: 0.7, amp: 0.26, sweep: 0.1, droop: -0.03, spread: 0, span:
 const wingTint = new Color("#e8683f");
 const tintTarget = new Color();
 
+// Sitting back to take in the view: one leg out along the ground, one knee up, and the
+// arms propped behind. Each bend is measured in the model's own axes (X tips forward and
+// back, with the model standing and facing +Z), because every bone has its own twist.
 const SIT_POSE: [string, number, number, number][] = [
-  ["UpperLeg.L", -1.45, 0, 0],
-  ["UpperLeg.R", -1.45, 0, 0],
-  ["LowerLeg.L", 1.5, 0, 0],
-  ["LowerLeg.R", 1.5, 0, 0],
-  ["UpperArm.L", 0.9, 0, 0],
-  ["UpperArm.R", 0.9, 0, 0],
+  ["Abdomen", -0.14, 0, 0],
+  ["Torso", -0.1, 0, 0],
+  ["Neck", 0.28, 0, 0],
+  ["Head", 0.28, 0, 0],
+  ["UpperLegL", -1.92, 0, 0.1],
+  ["LowerLegL", 2.05, 0, 0],
+  ["UpperLegR", -1.6, 0, -0.08],
+  ["LowerLegR", 0.1, 0, 0],
+  ["UpperArmL", 0.62, 0, -0.1],
+  ["LowerArmL", -0.1, 0, 0],
+  ["UpperArmR", 0.62, 0, 0.1],
+  ["LowerArmR", -0.1, 0, 0],
 ];
+
+const tilt = new Quaternion();
+const parentTurn = new Quaternion();
+const parentBack = new Quaternion();
 
 const lastBeat = { value: 0 };
 const euler = new Euler(0, 0, 0, "YXZ");
@@ -300,7 +313,7 @@ export function Hero({ lightRef }: { lightRef: React.RefObject<DirectionalLight 
   const flapPhase = useRef(0);
   const upright = useRef(0);
   const sitting = useRef(0);
-  const poses = useRef<{ bone: Bone; rest: Euler; bend: Euler }[]>([]);
+  const poses = useRef<{ bone: Bone; rest: Quaternion; bent: Quaternion }[]>([]);
   const wing = useMemo(() => buildWing(), []);
   const right = useMemo(() => makeWingMaterial(rightBend), []);
   const left = useMemo(() => makeWingMaterial(leftBend), []);
@@ -328,13 +341,21 @@ export function Hero({ lightRef }: { lightRef: React.RefObject<DirectionalLight 
     // The head tips back to look where it's going.
     const neck = scene.getObjectByName("Neck") as Bone | undefined;
     const head = scene.getObjectByName("Head") as Bone | undefined;
-    poses.current = SIT_POSE.flatMap(([name, x, y, z]) => {
-      const bone = scene.getObjectByName(name as string) as Bone | undefined;
-      return bone ? [{ bone, rest: bone.rotation.clone(), bend: new Euler(x as number, y as number, z as number) }] : [];
-    });
     if (neck) neck.rotateX(-0.45);
     if (head) head.rotateX(-0.45);
+    poses.current = SIT_POSE.flatMap(([name, x, y, z]) => {
+      const bone = scene.getObjectByName(name) as Bone | undefined;
+      if (!bone) return [];
+      // Turn the model-space bend into the frame this bone is posed in.
+      parentTurn.identity();
+      for (let up = bone.parent; up && up !== scene; up = up.parent) parentTurn.premultiply(up.quaternion);
+      parentBack.copy(parentTurn).invert();
+      tilt.setFromEuler(euler.set(x, y, z));
+      const rest = bone.quaternion.clone();
+      return [{ bone, rest, bent: parentBack.clone().multiply(tilt).multiply(parentTurn).multiply(rest) }];
+    });
     return () => {
+      for (const pose of poses.current) pose.bone.quaternion.copy(pose.rest);
       if (neck) neck.rotateX(0.45);
       if (head) head.rotateX(0.45);
     };
@@ -398,7 +419,7 @@ export function Hero({ lightRef }: { lightRef: React.RefObject<DirectionalLight 
     upright.current += ((resting ? Math.PI / 2 : hover * 1.32) - upright.current) * (1 - Math.exp(-3 * dt));
     // Knees bend and arms drop to sit down, and stretch out again for flight.
     sitting.current += ((resting ? 1 : 0) - sitting.current) * (1 - Math.exp(-3.5 * dt));
-    for (const pose of poses.current) pose.bone.rotation.set(pose.rest.x + pose.bend.x * sitting.current, pose.rest.y + pose.bend.y * sitting.current, pose.rest.z + pose.bend.z * sitting.current);
+    for (const pose of poses.current) pose.bone.quaternion.slerpQuaternions(pose.rest, pose.bent, sitting.current);
     body.current.rotation.x = upright.current;
     body.current.rotation.z = Math.sin(time * 26) * flight.shaken * flight.shaken * 0.32;
     // The body rises on each downstroke, which sells the wings doing the lifting.

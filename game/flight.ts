@@ -91,7 +91,7 @@ function stepRest(dt: number) {
   flight.yaw -= flight.turn * 0.6 * dt;
   flight.restTime += dt;
   // Settle down gently, as a bird does.
-  flight.pos.y = damp(flight.pos.y, flight.restY + 1.32, 2.4, dt);
+  flight.pos.y = damp(flight.pos.y, flight.restY + 0.36, 2.4, dt);
   if (flight.restTime > 0.6 && (input.throttle > 0 || input.boost || input.y > 0.2)) {
     flight.resting = false;
     flight.hovering = false;
