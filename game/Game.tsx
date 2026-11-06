@@ -1,40 +1,78 @@
 "use client";
 
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Suspense, useEffect, useRef, useState } from "react";
-import type { DirectionalLight } from "three";
+import type { Color, DirectionalLight, Fog, HemisphereLight } from "three";
+import { Atmosphere } from "./Atmosphere";
+import { sky, hurryDay } from "./time";
+import { VillageLife } from "./VillageLife";
+import { weather, startShower } from "./weather";
 import { audioState, renderForTest, setMuted, startAudio, stopAudio } from "./audio";
 import { captionNow, dropParcel, errands } from "./errands";
-import { Errands } from "./Errands";
-import { flight, startAt, type FlightMode } from "./flight";
+import { Errands } from "./ErrandScene";
+import { canLand, flight, land, startAt } from "./flight";
+import { enterPhoto, leavePhoto, loadPostcards, makePostcard, placeName, savePostcards, type Postcard } from "./photo";
+import { Ruin } from "./Ruin";
+import { SeaSkim } from "./SeaSkim";
 import { press } from "./input";
 import { PEOPLE } from "./people";
-import { People } from "./People";
+import { People } from "./Villagers";
+import { Fliers } from "./Fliers";
 import { Hero } from "./Hero";
 import { Sky, Terrain, Water } from "./Island";
-import { Arches, Trees, Villages } from "./Scenery";
+import { Caves } from "./Caves";
+import { Trees } from "./Forest";
+import { Arches, Villages } from "./Scenery";
+import { RiverAndFalls } from "./Waters";
 import { Balloons, Birds, Clouds, Leaves, Streaks, Wind } from "./Sky";
-import { heightAt, PLACES, VILLAGES, type PlaceId } from "./terrain";
+import { CAVES, FALLS, heightAt, PLACES, RIVER, VILLAGES, type PlaceId } from "./terrain";
 import { TREES } from "./trees";
 import { BALLOONS, FOG_FAR, FOG_NEAR, HORIZON, SUN, WIND } from "./world";
 
-const PACE: Record<FlightMode, string> = {
-  idle: "",
-  hover: "Hovering",
-  flap: "Flapping",
-  climb: "Climbing",
-  glide: "Gliding",
-  dive: "Diving",
-  boost: "Boosting",
-};
+const capture = { take: null as null | (() => string) };
+
+/** Renders one clean frame and reads it back, which the screen itself can't offer. */
+function CaptureBridge() {
+  const gl = useThree((state) => state.gl);
+  const scene = useThree((state) => state.scene);
+  const camera = useThree((state) => state.camera);
+  useEffect(() => {
+    if (process.env.NODE_ENV === "development") Object.assign(window, { __scene: scene, __gl: gl });
+    capture.take = () => {
+      gl.render(scene, camera);
+      return gl.domElement.toDataURL("image/jpeg", 0.92);
+    };
+    return () => {
+      capture.take = null;
+    };
+  }, [gl, scene, camera]);
+  return null;
+}
 
 function World() {
   const light = useRef<DirectionalLight>(null);
+  const fill = useRef<HemisphereLight>(null);
+  const fog = useRef<Fog>(null);
+  const background = useRef<Color>(null);
+  useFrame(() => {
+    // All the light comes from the time of day. Caves swallow it as you fly in.
+    if (light.current) {
+      light.current.intensity = sky.keyIntensity * (1 - flight.cave * 0.8);
+      light.current.color.copy(sky.key);
+    }
+    if (fill.current) {
+      fill.current.intensity = sky.fillIntensity * (1 - flight.cave * 0.72);
+      fill.current.color.copy(sky.fillSky);
+      fill.current.groundColor.copy(sky.fillGround);
+    }
+    fog.current?.color.copy(sky.horizon);
+    background.current?.copy(sky.horizon);
+  });
   return (
     <>
-      <color attach="background" args={[HORIZON]} />
-      <fog attach="fog" args={[HORIZON, FOG_NEAR, FOG_FAR]} />
-      <hemisphereLight args={["#dcecff", "#c9b48a", 1.05]} />
+      <color ref={background} attach="background" args={[HORIZON]} />
+      <fog ref={fog} attach="fog" args={[HORIZON, FOG_NEAR, FOG_FAR]} />
+      <hemisphereLight ref={fill} args={["#dcecff", "#c9b48a", 1.05]} />
       <directionalLight
         ref={light}
         position={[SUN.x * 420, SUN.y * 420, SUN.z * 420]}
@@ -53,12 +91,15 @@ function World() {
       <Sky />
       <Terrain />
       <Water />
+      <RiverAndFalls />
+      <Caves />
       <Trees />
       <Villages />
       <Arches />
       <Suspense fallback={null}>
         <Hero lightRef={light} />
         <Balloons />
+        <Fliers />
       </Suspense>
       <Birds />
       <Clouds />
@@ -66,6 +107,11 @@ function World() {
       <Streaks />
       <Leaves />
       <People />
+      <VillageLife />
+      <Atmosphere />
+      <SeaSkim />
+      <Ruin />
+      <CaptureBridge />
       <Errands />
     </>
   );
@@ -75,26 +121,29 @@ export default function Game() {
   const [flying, setFlying] = useState(false);
   const [hint, setHint] = useState(false);
   const [muted, setMutedState] = useState(false);
-  const [pace, setPace] = useState("Flapping");
   const [caption, setCaption] = useState("");
   const [carrying, setCarrying] = useState(false);
+  const [landable, setLandable] = useState(false);
+  const [photoMode, setPhotoMode] = useState(false);
+  const [album, setAlbum] = useState<Postcard[] | null>(null);
+  const [flash, setFlash] = useState(false);
 
   const hintTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     if (process.env.NODE_ENV === "development") {
-      Object.assign(window, { __flight: flight, __game: { BALLOONS, WIND, VILLAGES, TREES, PEOPLE, errands, heightAt, renderForTest, audioState } });
+      Object.assign(window, { __flight: flight, __game: { BALLOONS, WIND, VILLAGES, TREES, PEOPLE, errands, CAVES, FALLS, RIVER, sky, weather, startShower, heightAt, renderForTest, audioState } });
     }
     return stopAudio;
   }, []);
 
-  // A small read-out, so it's always clear what speed you're at.
+  // Keeps the on-screen captions and the land button current.
   useEffect(() => {
     if (!flying) return;
     const id = setInterval(() => {
-      setPace(flight.speed < -2 ? "Drifting back" : PACE[flight.mode]);
       setCaption(captionNow(flight.clock));
       setCarrying(!!errands.carrying);
+      setLandable(canLand());
     }, 200);
     return () => clearInterval(id);
   }, [flying]);
@@ -102,6 +151,11 @@ export default function Game() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.code === "KeyX") dropParcel();
+      if (e.code === "KeyH" && flight.flying) toggleControls();
+      if (e.code === "KeyT") hurryDay();
+      if (e.code === "KeyE") land();
+      if (e.code === "KeyP" && flight.flying) togglePhoto();
+      if (e.code === "Enter" && flight.photo) void snap();
       if (e.code !== "KeyM") return;
       setMutedState((value) => {
         setMuted(!value);
@@ -111,6 +165,31 @@ export default function Game() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // Once you ask for the controls, they stay up until you put them away.
+  function toggleControls() {
+    clearTimeout(hintTimer.current);
+    setHint((shown) => !shown);
+  }
+
+  function togglePhoto() {
+    if (flight.photo) {
+      leavePhoto();
+      setPhotoMode(false);
+    } else {
+      enterPhoto();
+      setPhotoMode(true);
+    }
+  }
+
+  async function snap() {
+    if (!capture.take) return;
+    const place = placeName(flight.pos.x, flight.pos.y, flight.pos.z);
+    const image = await makePostcard(capture.take(), place);
+    savePostcards([{ id: Date.now(), place, image }, ...loadPostcards()]);
+    setFlash(true);
+    setTimeout(() => setFlash(false), 220);
+  }
 
   function begin(place: PlaceId) {
     startAudio();
@@ -122,6 +201,8 @@ export default function Game() {
   }
 
   function changeStart() {
+    leavePhoto();
+    setPhotoMode(false);
     flight.flying = false;
     setFlying(false);
   }
@@ -156,7 +237,61 @@ export default function Game() {
         </div>
       )}
 
-      {flying && (
+      {flash && <div className="pointer-events-none absolute inset-0 bg-white/70" />}
+
+      {album && (
+        <div className="absolute inset-0 overflow-y-auto bg-slate-950/80 p-6 text-white backdrop-blur">
+          <div className="mx-auto max-w-5xl">
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-light">Postcards</h2>
+              <button onClick={() => setAlbum(null)} className="rounded-full bg-white px-5 py-2 text-sm font-medium text-slate-900">
+                Close
+              </button>
+            </div>
+            {album.length === 0 && <p className="mt-10 text-center text-white/80">No postcards yet. Press P while flying to take your first.</p>}
+            <div className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+              {album.map((card) => (
+                <figure key={card.id} className="group relative">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={card.image} alt={`Postcard of ${card.place}`} className="w-full rounded shadow-xl" />
+                  <figcaption className="mt-2 flex gap-3 text-sm">
+                    <a href={card.image} download={`${card.place}.jpg`} className="underline underline-offset-2">
+                      Save
+                    </a>
+                    <button
+                      onClick={() => {
+                        const left = album.filter((c) => c.id !== card.id);
+                        savePostcards(left);
+                        if (left.length === 0) localStorage.removeItem("aloft-postcards");
+                        setAlbum(left);
+                      }}
+                      className="underline underline-offset-2"
+                    >
+                      Remove
+                    </button>
+                  </figcaption>
+                </figure>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {flying && photoMode && !album && (
+        <div className="absolute inset-x-0 bottom-6 flex flex-col items-center gap-3 px-4 text-white">
+          <p className="rounded-full bg-black/35 px-4 py-1.5 text-center text-sm backdrop-blur">Arrows move the camera · W and S zoom</p>
+          <div className="flex gap-2">
+            <button onClick={() => void snap()} className="rounded-full bg-white px-6 py-2.5 text-sm font-medium text-slate-900 shadow-lg">
+              Take photo (Enter)
+            </button>
+            <button onClick={togglePhoto} className="rounded-full bg-black/40 px-5 py-2.5 text-sm backdrop-blur">
+              Done (P)
+            </button>
+          </div>
+        </div>
+      )}
+
+      {flying && !photoMode && !album && (
         <>
           <div
             className={`pointer-events-none absolute inset-x-4 top-16 mx-auto max-w-md rounded-2xl bg-black/35 px-5 py-3 text-sm leading-6 text-white backdrop-blur transition-opacity duration-1000 ${hint ? "opacity-100" : "opacity-0"}`}
@@ -164,17 +299,26 @@ export default function Game() {
             <p><b className="font-semibold">↓</b> flap up · <b className="font-semibold">↑</b> dive · <b className="font-semibold">← →</b> turn</p>
             <p><b className="font-semibold">W</b> flap forward · let go to glide · <b className="font-semibold">S</b> brake to a hover</p>
             <p><b className="font-semibold">Shift</b> boost · or drag the mouse to steer</p>
+            <p><b className="font-semibold">E</b> land, then <b className="font-semibold">W</b> to fly again · <b className="font-semibold">P</b> photo · <b className="font-semibold">T</b> move the day along · <b className="font-semibold">X</b> set a parcel down</p>
+            <p><b className="font-semibold">M</b> sound · <b className="font-semibold">H</b> show or hide this</p>
             <p className="mt-1 text-white/80">See a golden glow? Someone has a parcel, if you feel like carrying it.</p>
           </div>
           {caption && (
-            <div className="pointer-events-none absolute inset-x-4 bottom-16 mx-auto w-fit max-w-lg rounded-2xl bg-black/35 px-5 py-2 text-center text-sm leading-6 text-white backdrop-blur pointer-coarse:bottom-40">
+            <div className="pointer-events-none absolute inset-x-4 bottom-8 mx-auto w-fit max-w-lg rounded-2xl bg-black/35 px-5 py-2 text-center text-sm leading-6 text-white backdrop-blur pointer-coarse:bottom-40">
               {caption}
             </div>
           )}
-          <div className="pointer-events-none absolute bottom-5 left-1/2 -translate-x-1/2 rounded-full bg-black/30 px-4 py-1.5 text-sm text-white backdrop-blur pointer-coarse:bottom-28">
-            {pace}
-          </div>
           <div className="absolute right-4 top-4 flex gap-2">
+            <button
+              onClick={(e) => {
+                e.currentTarget.blur();
+                toggleControls();
+              }}
+              aria-pressed={hint}
+              className="rounded-full bg-black/25 px-4 py-2 text-sm text-white backdrop-blur transition hover:bg-black/40"
+            >
+              Controls
+            </button>
             <button
               onClick={(e) => {
                 e.currentTarget.blur();
@@ -186,6 +330,12 @@ export default function Game() {
             >
               {muted ? "Sound off" : "Sound on"}
             </button>
+            <button onClick={togglePhoto} className="rounded-full bg-black/25 px-4 py-2 text-sm text-white backdrop-blur transition hover:bg-black/40">
+              Photo
+            </button>
+            <button onClick={() => setAlbum(loadPostcards())} className="rounded-full bg-black/25 px-4 py-2 text-sm text-white backdrop-blur transition hover:bg-black/40">
+              Postcards
+            </button>
             <button
               onClick={changeStart}
               className="rounded-full bg-black/25 px-4 py-2 text-sm text-white backdrop-blur transition hover:bg-black/40"
@@ -194,6 +344,11 @@ export default function Game() {
             </button>
           </div>
           <div className="absolute bottom-6 right-4 hidden gap-2 pointer-coarse:flex">
+            {landable && (
+              <button onClick={() => land()} className="h-16 w-16 rounded-full bg-white/30 text-xs font-medium text-white backdrop-blur active:bg-white/50">
+                Land
+              </button>
+            )}
             {carrying && (
               <button onClick={dropParcel} className="h-16 w-16 rounded-full bg-white/30 text-xs font-medium text-white backdrop-blur active:bg-white/50">
                 Set down

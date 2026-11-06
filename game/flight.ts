@@ -1,7 +1,8 @@
 import { Vector3 } from "three";
 import { bounceSound, crashSound } from "./audio";
 import { input } from "./input";
-import { heightAt, PLACES, type PlaceId } from "./terrain";
+import { landingHeight } from "./villages";
+import { caveAt, heightAt, PLACES, riverSurface, type PlaceId } from "./terrain";
 import { treeAt, type Tree } from "./trees";
 import { BALLOONS, WIND } from "./world";
 
@@ -12,7 +13,7 @@ const GLIDE_MIN = 26;
 const DIVE_MAX = 170;
 const REVERSE = -14;
 
-export type FlightMode = "idle" | "hover" | "flap" | "climb" | "glide" | "dive" | "boost";
+export type FlightMode = "idle" | "hover" | "flap" | "climb" | "glide" | "dive" | "boost" | "rest";
 const TURN_RATE = 1.0;
 const MAX_CLIMB = 0.72;
 const MAX_DIVE = 1.25;
@@ -39,6 +40,17 @@ export const flight = {
   wind: 0,
   bounces: 0,
   crashes: 0,
+  /** Sitting on the ground or a rooftop. Any flying input takes off again. */
+  resting: false,
+  /** How long you've been sitting, which lets the camera drift away. */
+  restTime: 0,
+  restY: 0,
+  /** Frozen in place while lining up a photo. */
+  photo: false,
+  /** 1 while skimming low across water. */
+  skimming: 0,
+  /** 1 deep inside a cave, used to dim the lights. */
+  cave: 0,
   /** Eases from 1 to 0 after hitting a tree, to shake the body. */
   shaken: 0,
   clock: 0,
@@ -46,6 +58,53 @@ export const flight = {
 
 /** Trees that were just hit, for the leaves and the shaking to pick up. */
 export const crashEvents: { tree: Tree; x: number; y: number; z: number }[] = [];
+
+const LAND_FROM = 70;
+
+/** Whether there's somewhere to set down below you. */
+export function canLand() {
+  if (!flight.flying || flight.resting || flight.cave > 0.5 || Math.abs(flight.speed) > 60) return false;
+  const top = landingHeight(flight.pos.x, flight.pos.z);
+  return top !== null && flight.pos.y - top < LAND_FROM;
+}
+
+export function land() {
+  if (!canLand()) return false;
+  flight.resting = true;
+  flight.restTime = 0;
+  flight.restY = landingHeight(flight.pos.x, flight.pos.z)!;
+  flight.hovering = false;
+  flight.speed = 0;
+  flight.pitch = 0;
+  flight.impulse.set(0, 0, 0);
+  return true;
+}
+
+function stepRest(dt: number) {
+  flight.mode = "rest";
+  flight.speed = 0;
+  flight.hover = damp(flight.hover, 1, 3, dt);
+  flight.wind = damp(flight.wind, 0, 2, dt);
+  flight.pitch = damp(flight.pitch, 0, 4, dt);
+  flight.roll = damp(flight.roll, 0, 4, dt);
+  flight.turn = damp(flight.turn, input.x, 3, dt);
+  flight.yaw -= flight.turn * 0.6 * dt;
+  flight.restTime += dt;
+  // Settle down gently, as a bird does.
+  flight.pos.y = damp(flight.pos.y, flight.restY + 1.32, 2.4, dt);
+  if (flight.restTime > 0.6 && (input.throttle > 0 || input.boost || input.y > 0.2)) {
+    flight.resting = false;
+    flight.hovering = false;
+    flight.speed = 18;
+    flight.impulse.set(0, 15, 0);
+  }
+}
+
+function waterBelow() {
+  const river = riverSurface(flight.pos.x, flight.pos.z);
+  if (river !== null) return river;
+  return heightAt(flight.pos.x, flight.pos.z) < 0.5 ? 0 : null;
+}
 
 export function startAt(id: PlaceId) {
   const place = PLACES[id];
@@ -61,6 +120,7 @@ export function startAt(id: PlaceId) {
   flight.hover = 0;
   flight.impulse.set(0, 16, 0);
   flight.wind = 0;
+  flight.resting = false;
   flight.flying = true;
 }
 
@@ -142,12 +202,42 @@ function applyTrees() {
   crashSound(strength);
 }
 
+/** Inside a cave, the walls gently hold you to the middle and the roof keeps you in. */
+function applyCave(dt: number) {
+  const at = caveAt(flight.pos.x, flight.pos.z);
+  const roof = at ? at.floor + at.cave.roof : 0;
+  const inside = !!at && at.distance < at.cave.half + 6 && flight.pos.y < roof + 1;
+  flight.cave = damp(flight.cave, inside ? 1 : 0, 3, dt);
+  if (!at || !inside) return;
+  const a = at.cave.points[at.index];
+  const b = at.cave.points[at.index + 1];
+  const ex = b.x - a.x;
+  const ez = b.z - a.z;
+  const length = Math.hypot(ex, ez);
+  if (Math.abs(at.lateral) > 8) {
+    // The lateral offset is to the left of the tunnel, so push back along the right.
+    const push = (Math.abs(at.lateral) - 8) * 2.2 * Math.sign(at.lateral) * dt;
+    flight.pos.x += (ez / length) * push;
+    flight.pos.z += (-ex / length) * push;
+  }
+  const along = (flight.dir.x * ex + flight.dir.z * ez) / length;
+  const yaw = Math.atan2(-ex * Math.sign(along || 1), -ez * Math.sign(along || 1));
+  flight.yaw += angleTo(flight.yaw, yaw) * Math.min(1, 0.9 * dt);
+  const ceiling = roof - 3.5;
+  if (flight.pos.y > ceiling) flight.pos.y = damp(flight.pos.y, ceiling, 10, dt);
+  if (flight.impulse.y > 0) flight.impulse.y *= Math.exp(-5 * dt);
+}
+
 export function stepFlight(dt: number, time: number) {
   flight.clock = time;
   for (const b of BALLOONS) {
     b.pos.set(b.base.x + Math.sin(time * 0.11 + b.phase) * 7, b.base.y + Math.sin(time * 0.27 + b.phase * 2) * 5, b.base.z + Math.cos(time * 0.09 + b.phase) * 7);
   }
-  if (!flight.flying) return;
+  if (!flight.flying || flight.photo) return;
+  if (flight.resting) {
+    stepRest(dt);
+    return;
+  }
 
   flight.boost = damp(flight.boost, input.boost ? 1 : 0, input.boost ? 2.6 : 1.6, dt);
   flight.turn = damp(flight.turn, input.x, 3.6, dt);
@@ -176,7 +266,8 @@ export function stepFlight(dt: number, time: number) {
   // Look further ahead the faster you go, and lift the nose in time for hills.
   const reach = Math.max(30, flight.speed * 0.8);
   const ahead = Math.max(heightAt(flight.pos.x + flight.dir.x * reach, flight.pos.z + flight.dir.z * reach), heightAt(flight.pos.x + flight.dir.x * reach * 2, flight.pos.z + flight.dir.z * reach * 2), 0);
-  const safe = 9 + Math.max(0, flight.speed - 60) * 0.5;
+  // Over water there's nothing to hit, so you're free to skim right down to the surface.
+  const safe = ahead <= 0.5 ? 3 : 9 + Math.max(0, flight.speed - 60) * 0.5;
   const margin = flight.pos.y - ahead;
   if (margin < safe && flight.speed > 12) targetPitch = Math.max(targetPitch, Math.min(0.8, (safe - margin) * 0.07));
 
@@ -243,6 +334,12 @@ export function stepFlight(dt: number, time: number) {
   flight.pos.addScaledVector(flight.dir, flight.speed * dt);
   flight.pos.addScaledVector(flight.impulse, dt);
   flight.pos.y += lift * dt;
+
+  applyCave(dt);
+
+  const water = waterBelow();
+  const skimming = water !== null && flight.pos.y - water < 11 && Math.abs(flight.speed) > 14;
+  flight.skimming = damp(flight.skimming, skimming ? 1 : 0, 6, dt);
 
   // The ground never stops you. A cushion of air just carries you over it.
   const floor = Math.max(heightAt(flight.pos.x, flight.pos.z), 0) + CLEARANCE;

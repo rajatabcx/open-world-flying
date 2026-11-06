@@ -5,7 +5,7 @@ import { useFrame } from "@react-three/fiber";
 import { useLayoutEffect, useMemo, useRef } from "react";
 import { Box3, BufferGeometry, DoubleSide, Float32BufferAttribute, Group, InstancedBufferAttribute, InstancedBufferGeometry, InstancedMesh, LineSegments, Object3D, PlaneGeometry, Points, Quaternion, TorusGeometry, Vector3, AdditiveBlending } from "three";
 import { crashEvents, flight, CRUISE } from "./flight";
-import { FOG_GLSL, shared } from "./shared";
+import { bindUniforms, FOG_GLSL, shared } from "./shared";
 import { PLACES, rng, SUMMIT } from "./terrain";
 import { BALLOONS, SUN, WIND } from "./world";
 
@@ -99,6 +99,7 @@ export function Clouds() {
         transparent
         depthWrite={false}
         uniforms={uniforms}
+        ref={bindUniforms(uniforms)}
         vertexShader={/* glsl */ `
           attribute vec3 aOffset;
           attribute float aSize;
@@ -120,6 +121,8 @@ export function Clouds() {
           }
         `}
         fragmentShader={/* glsl */ `
+          uniform vec3 uKey;
+          uniform vec3 uAmbient;
           varying vec2 vUv;
           varying float vSeed;
           varying float vDist;
@@ -139,6 +142,7 @@ export function Clouds() {
             alpha *= smoothstep(25.0, 150.0, vDist) * 0.8;
             if (alpha < 0.004) discard;
             vec3 col = mix(vec3(0.80, 0.83, 0.88), vec3(1.0, 0.985, 0.95), smoothstep(-0.45, 0.3, p.y + vSeed * 0.25));
+            col *= uAmbient * 1.05 + uKey * 0.42;
             gl_FragColor = vec4(applyFog(col, vDist), alpha);
             #include <colorspace_fragment>
           }
@@ -219,6 +223,7 @@ export function Wind() {
           depthWrite={false}
           blending={AdditiveBlending}
           uniforms={shared}
+        ref={bindUniforms(shared)}
           vertexShader={/* glsl */ `
             varying float vDist;
             void main() {
@@ -310,22 +315,68 @@ function birdGeometry() {
   return b;
 }
 
+const ESCORT_SIZE = 8;
+const escort = { flock: -1, until: 0, next: 0 };
+const wild = new Vector3();
+const flown = new Vector3();
+
 export function Birds() {
   const ref = useRef<InstancedMesh>(null!);
   const geometry = useMemo(() => birdGeometry(), []);
   const birds = useMemo(() => {
     const r = rng(2024);
     return FLOCKS.flatMap((flock, f) =>
-      Array.from({ length: PER_FLOCK }, () => ({ f, a: r() * 0.9, off: new Vector3((r() - 0.5) * 22, (r() - 0.5) * 14, (r() - 0.5) * 22), speed: 0.17 + r() * 0.015 })),
+      Array.from({ length: PER_FLOCK }, () => ({ f, a: r() * 0.9, off: new Vector3((r() - 0.5) * 22, (r() - 0.5) * 14, (r() - 0.5) * 22), speed: 0.17 + r() * 0.015, now: new Vector3(), ready: false })),
     );
   }, []);
-  useFrame((state) => {
+  useFrame((state, rawDelta) => {
+    const delta = Math.min(rawDelta, 0.05);
     const t = state.clock.elapsedTime;
+    // Fly close to a flock and a few peel off to keep you company for a while.
+    FLOCKS.forEach((flock, f) => {
+      const a = t * 0.175 + 0.45 + f * 1.3;
+      const near = Math.hypot(flight.pos.x - (flock.x + Math.cos(a) * flock.r), flight.pos.y - flock.y, flight.pos.z - (flock.z + Math.sin(a) * flock.r));
+      if (flight.flying && !flight.resting && escort.flock < 0 && t > escort.next && near < 95 && flight.speed > 15) {
+        escort.flock = f;
+        escort.until = t + 42;
+      }
+    });
+    if (escort.flock >= 0 && t > escort.until) {
+      escort.flock = -1;
+      escort.next = t + 28;
+    }
+    let formed = 0;
     birds.forEach((bird, i) => {
       const flock = FLOCKS[bird.f];
       const a = t * bird.speed + bird.a + bird.f * 1.3;
-      birdDummy.position.set(flock.x + Math.cos(a) * flock.r + bird.off.x, flock.y + Math.sin(a * 1.7) * 12 + bird.off.y, flock.z + Math.sin(a) * flock.r + bird.off.z);
-      birdDummy.rotation.set(0, -a + Math.PI, 0);
+      wild.set(flock.x + Math.cos(a) * flock.r + bird.off.x, flock.y + Math.sin(a * 1.7) * 12 + bird.off.y, flock.z + Math.sin(a) * flock.r + bird.off.z);
+      const joining = bird.f === escort.flock && formed < ESCORT_SIZE;
+      if (bird.f === escort.flock) formed++;
+      if (joining) {
+        // A loose V, spread out behind your wings.
+        const rank = Math.floor(formed / 2) + 1;
+        const side = formed % 2 === 0 ? 1 : -1;
+        const sx = Math.cos(flight.yaw);
+        const sz = -Math.sin(flight.yaw);
+        const back = 7 + rank * 5;
+        wild.set(
+          flight.pos.x + sx * side * (5 + rank * 4.5) + Math.sin(flight.yaw) * back,
+          flight.pos.y + 2 + rank * 0.6 + Math.sin(t * 1.3 + i) * 0.5,
+          flight.pos.z + sz * side * (5 + rank * 4.5) + Math.cos(flight.yaw) * back,
+        );
+      }
+      const wasInit = bird.ready;
+      if (!bird.ready) {
+        bird.now.copy(wild);
+        bird.ready = true;
+      }
+      const pull = joining ? 2.6 : 0.8;
+      flown.copy(bird.now);
+      bird.now.lerp(wild, 1 - Math.exp(-pull * delta));
+      birdDummy.position.copy(bird.now);
+      flown.subVectors(bird.now, flown);
+      birdDummy.rotation.set(0, joining ? flight.yaw : wasInit && flown.lengthSq() > 1e-6 ? Math.atan2(-flown.x, -flown.z) : -a + Math.PI, 0);
+      birdDummy.scale.setScalar(joining ? 0.42 : 1);
       birdDummy.updateMatrix();
       ref.current.setMatrixAt(i, birdDummy.matrix);
     });
@@ -336,6 +387,7 @@ export function Birds() {
       <shaderMaterial
         side={DoubleSide}
         uniforms={shared}
+        ref={bindUniforms(shared)}
         vertexShader={/* glsl */ `
           uniform float uTime;
           varying float vDist;
@@ -349,10 +401,12 @@ export function Birds() {
           }
         `}
         fragmentShader={/* glsl */ `
+          uniform vec3 uKey;
+          uniform vec3 uAmbient;
           varying float vDist;
           ${FOG_GLSL}
           void main() {
-            gl_FragColor = vec4(applyFog(vec3(0.97, 0.96, 0.92), vDist), 1.0);
+            gl_FragColor = vec4(applyFog(vec3(0.97, 0.96, 0.92) * (uAmbient * 1.05 + uKey * 0.42), vDist), 1.0);
             #include <colorspace_fragment>
           }
         `}

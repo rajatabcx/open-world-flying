@@ -1,6 +1,26 @@
 // All sound is synthesised here, so there are no audio files or licenses to manage.
 
-type Output = { ctx: BaseAudioContext; music: AudioNode; sfx: AudioNode };
+type Output = {
+  ctx: BaseAudioContext;
+  music: AudioNode;
+  sfx: AudioNode;
+  /** The music's layers, which rise and fall with where you are. */
+  pads: AudioNode;
+  plucks: AudioNode;
+  warm: AudioNode;
+  high: AudioNode;
+};
+type Mix = {
+  padTrim: BiquadFilterNode;
+  padLevel: GainNode;
+  pluckLevel: GainNode;
+  warmLevel: GainNode;
+  highLevel: GainNode;
+  wet: GainNode;
+  sfxRoom: GainNode;
+  musicLevel: GainNode;
+  musicTone: BiquadFilterNode;
+};
 
 const midi = (n: number) => 440 * Math.pow(2, (n - 69) / 12);
 
@@ -34,7 +54,7 @@ function noiseBuffer(ctx: BaseAudioContext, seconds: number) {
 }
 
 /** Builds the mix: music and effects go through soft compression, with a shared room. */
-function buildOutput(ctx: BaseAudioContext, destination: AudioNode): Output & { master: GainNode } {
+function buildOutput(ctx: BaseAudioContext, destination: AudioNode): Output & { master: GainNode; mix: Mix } {
   const master = ctx.createGain();
   const limiter = ctx.createDynamicsCompressor();
   limiter.threshold.value = -14;
@@ -51,8 +71,27 @@ function buildOutput(ctx: BaseAudioContext, destination: AudioNode): Output & { 
 
   const music = ctx.createGain();
   music.gain.value = 0.8;
-  music.connect(master);
-  music.connect(reverb);
+  const musicTone = ctx.createBiquadFilter();
+  musicTone.type = "lowpass";
+  musicTone.frequency.value = 18000;
+  music.connect(musicTone);
+  musicTone.connect(master);
+  musicTone.connect(reverb);
+
+  const padTrim = ctx.createBiquadFilter();
+  padTrim.type = "highpass";
+  padTrim.frequency.value = 30;
+  const padLevel = ctx.createGain();
+  padTrim.connect(padLevel);
+  padLevel.connect(music);
+  const pluckLevel = ctx.createGain();
+  pluckLevel.connect(music);
+  const warmLevel = ctx.createGain();
+  warmLevel.gain.value = 0.5;
+  warmLevel.connect(music);
+  const highLevel = ctx.createGain();
+  highLevel.gain.value = 0.5;
+  highLevel.connect(music);
 
   const sfx = ctx.createGain();
   sfx.gain.value = 0.9;
@@ -62,10 +101,20 @@ function buildOutput(ctx: BaseAudioContext, destination: AudioNode): Output & { 
   sfx.connect(sfxRoom);
   sfxRoom.connect(reverb);
 
-  return { ctx, master, music, sfx };
+  return {
+    ctx,
+    master,
+    music,
+    sfx,
+    pads: padTrim,
+    plucks: pluckLevel,
+    warm: warmLevel,
+    high: highLevel,
+    mix: { padTrim, padLevel, pluckLevel, warmLevel, highLevel, wet, sfxRoom, musicLevel: music, musicTone },
+  };
 }
 
-function padNote(out: Output, freq: number, start: number, length: number, level: number) {
+function padNote(out: Output, freq: number, start: number, length: number, level: number, bus: AudioNode = out.pads) {
   const { ctx } = out;
   const gain = ctx.createGain();
   const filter = ctx.createBiquadFilter();
@@ -79,7 +128,7 @@ function padNote(out: Output, freq: number, start: number, length: number, level
   gain.gain.setValueAtTime(level, start + length * 0.6);
   gain.gain.linearRampToValueAtTime(0, start + length);
   filter.connect(gain);
-  gain.connect(out.music);
+  gain.connect(bus);
   for (const [type, detune, amount] of [
     ["triangle", -6, 0.6],
     ["triangle", 6, 0.6],
@@ -98,13 +147,13 @@ function padNote(out: Output, freq: number, start: number, length: number, level
   }
 }
 
-function pluck(out: Output, freq: number, start: number, level: number) {
+function pluck(out: Output, freq: number, start: number, level: number, bus: AudioNode = out.plucks) {
   const { ctx } = out;
   const gain = ctx.createGain();
   gain.gain.setValueAtTime(0, start);
   gain.gain.linearRampToValueAtTime(level, start + 0.012);
   gain.gain.exponentialRampToValueAtTime(0.0001, start + 3.2);
-  gain.connect(out.music);
+  gain.connect(bus);
   for (const [ratio, amount] of [
     [1, 1],
     [2, 0.22],
@@ -134,6 +183,18 @@ function scheduleBar(out: Output, bar: number, start: number) {
     last = Math.max(0, Math.min(SCALE.length - 1, last + Math.round((Math.random() - 0.5) * 4)));
     pluck(out, midi(SCALE[last]), t, 0.05 + Math.random() * 0.035);
     t += 2.2 + Math.random() * 3.6;
+  }
+  // Near the villages, a warm plucked pattern like someone playing on a doorstep.
+  const low = [...chord].sort((a, b) => a - b).slice(0, 5);
+  const beat = CHORD_SECONDS / 14;
+  for (let i = 0; i < 14; i++) {
+    if (i % 7 === 6) continue;
+    const note = low[[0, 2, 3, 1, 4, 2][i % 6]];
+    pluck(out, midi(note + (note < 50 ? 12 : 0)), start + i * beat + Math.random() * 0.03, 0.05 + Math.random() * 0.018, out.warm);
+  }
+  // High up, thin glassy tones hang over everything.
+  for (const note of [chord[3] + 24, chord[5] + 12]) {
+    padNote(out, midi(note), start + 2 + Math.random() * 4, CHORD_SECONDS - 2, 0.016, out.high);
   }
 }
 
@@ -238,8 +299,101 @@ function playBells(out: Output, at: number, notes: number[], level: number) {
 const PICKUP = [74, 81];
 const DELIVERED = [74, 78, 81, 86];
 
+/** A puff of air from one wingbeat. */
+function playBeat(out: Output, at: number, strength: number) {
+  const { ctx } = out;
+  const source = ctx.createBufferSource();
+  source.buffer = noiseBuffer(ctx, 0.35);
+  const filter = ctx.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.Q.value = 0.8;
+  filter.frequency.setValueAtTime(190, at);
+  filter.frequency.linearRampToValueAtTime(520, at + 0.07);
+  filter.frequency.exponentialRampToValueAtTime(130, at + 0.3);
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0, at);
+  gain.gain.linearRampToValueAtTime(0.42 + strength * 0.5, at + 0.05);
+  gain.gain.exponentialRampToValueAtTime(0.001, at + 0.32);
+  source.connect(filter);
+  filter.connect(gain);
+  gain.connect(out.sfx);
+  source.start(at);
+}
+
+export type Scene = {
+  wind: number;
+  windTone: number;
+  rush: number;
+  spray: number;
+  falls: number;
+  rain: number;
+  /** 0 to 1, how high above the ground you are. */
+  high: number;
+  /** 0 to 1, how close to a village you are. */
+  village: number;
+  cave: number;
+  night: number;
+};
+
+type Beds = { wind: GainNode; windFilter: BiquadFilterNode; rush: GainNode; spray: GainNode; falls: GainNode; rain: GainNode };
+
+function loopInto(out: Output, type: BiquadFilterType, frequency: number, q: number) {
+  const { ctx } = out;
+  const source = ctx.createBufferSource();
+  source.buffer = noiseBuffer(ctx, 5);
+  source.loop = true;
+  const filter = ctx.createBiquadFilter();
+  filter.type = type;
+  filter.frequency.value = frequency;
+  filter.Q.value = q;
+  const gain = ctx.createGain();
+  gain.gain.value = 0;
+  source.connect(filter);
+  filter.connect(gain);
+  gain.connect(out.sfx);
+  source.start();
+  return { gain, filter };
+}
+
+/** The sounds that never stop, only swell: the air, the water and the rain. */
+function buildBeds(out: Output): Beds {
+  const wind = loopInto(out, "bandpass", 400, 0.5);
+  return {
+    wind: wind.gain,
+    windFilter: wind.filter,
+    rush: loopInto(out, "highpass", 2200, 0.4).gain,
+    spray: loopInto(out, "highpass", 3400, 0.5).gain,
+    falls: loopInto(out, "lowpass", 1100, 0.3).gain,
+    rain: loopInto(out, "bandpass", 5200, 0.4).gain,
+  };
+}
+
+function applyScene(ctx: BaseAudioContext, beds: Beds, mix: Mix, s: Scene) {
+  const now = ctx.currentTime;
+  const set = (param: AudioParam, value: number, ease = 0.25) => param.setTargetAtTime(value, now, ease);
+  set(beds.wind.gain, s.wind);
+  set(beds.windFilter.frequency, s.windTone);
+  set(beds.rush.gain, s.rush);
+  set(beds.spray.gain, s.spray, 0.12);
+  set(beds.falls.gain, s.falls);
+  set(beds.rain.gain, s.rain, 0.8);
+
+  set(mix.padTrim.frequency, 30 + s.high * 340, 1.6);
+  set(mix.padLevel.gain, 1 - s.high * 0.42, 1.6);
+  set(mix.pluckLevel.gain, 1 - s.village * 0.3, 1.6);
+  set(mix.warmLevel.gain, s.village, 1.6);
+  set(mix.highLevel.gain, s.high, 1.6);
+  set(mix.wet.gain, 0.5 + s.high * 0.25 + s.cave * 0.3, 1.6);
+  set(mix.sfxRoom.gain, 0.18 + s.cave * 0.55, 0.5);
+  set(mix.musicTone.frequency, s.cave > 0.5 ? 950 : 18000, 0.8);
+  set(mix.musicLevel.gain, 0.8 * (1 - s.night * 0.22), 2);
+}
+
+export const SILENT: Scene = { wind: 0, windTone: 400, rush: 0, spray: 0, falls: 0, rain: 0, high: 0, village: 0, cave: 0, night: 0 };
+
+let beds: Beds | null = null;
 let context: AudioContext | null = null;
-let output: (Output & { master: GainNode }) | null = null;
+let output: (Output & { master: GainNode; mix: Mix }) | null = null;
 let muted = false;
 let timer: ReturnType<typeof setInterval> | undefined;
 
@@ -252,6 +406,7 @@ export function startAudio() {
   context = new AudioContext();
   output = buildOutput(context, context.destination);
   output.master.gain.value = muted ? 0 : 1;
+  beds = buildBeds(output);
   void context.resume();
   let bar = 0;
   let next = context.currentTime + 0.15;
@@ -279,6 +434,7 @@ export function stopAudio() {
   void context?.close();
   context = null;
   output = null;
+  beds = null;
 }
 
 export const audioState = () => context?.state ?? "not started";
@@ -296,6 +452,14 @@ export function crashSound(strength: number) {
   if (context && output) playCrash(output, context.currentTime, strength);
 }
 
+export function wingBeatSound(strength: number) {
+  if (context && output) playBeat(output, context.currentTime, strength);
+}
+
+export function setScene(scene: Scene) {
+  if (context && output && beds) applyScene(context, beds, output.mix, scene);
+}
+
 export function pickupSound() {
   if (context && output) playBells(output, context.currentTime, PICKUP, 0.14);
 }
@@ -305,13 +469,19 @@ export function deliveredSound() {
 }
 
 /** Renders sound with no speakers, so a test can check levels. */
-export async function renderForTest(kind: "music" | "bounce" | "crash", seconds: number) {
+export async function renderForTest(kind: "music" | "bounce" | "crash" | "beat" | "fast" | "falls", seconds: number) {
   const ctx = new OfflineAudioContext(2, 44100 * seconds, 44100);
   const out = buildOutput(ctx, ctx.destination);
   if (kind === "music") {
     for (let i = 0; i * CHORD_SECONDS < seconds; i++) scheduleBar(out, i, i * CHORD_SECONDS);
   } else if (kind === "bounce") {
     playBounce(out, 0.05);
+  } else if (kind === "beat") {
+    playBeat(out, 0.05, 0.55);
+  } else if (kind === "fast" || kind === "falls") {
+    const test = buildBeds(out);
+    const scene = kind === "fast" ? { ...SILENT, wind: 0.34, windTone: 1100, rush: 0.15 } : { ...SILENT, falls: 0.32 };
+    applyScene(ctx, test, out.mix, scene);
   } else {
     playCrash(out, 0.05, 1);
   }

@@ -1,5 +1,5 @@
 import { CatmullRomCurve3, Vector3 } from "three";
-import { heightAt, PLACES, rng, SUMMIT, VILLAGES } from "./terrain";
+import { FALLS, heightAt, PLACES, RIVER, rng, SUMMIT, VILLAGES } from "./terrain";
 
 export const SUN = new Vector3(-0.55, 0.62, 0.42).normalize();
 export const HORIZON = "#d9e6e4";
@@ -83,9 +83,12 @@ function makePath(kind: WindPath["kind"], radius: number, points: Vector3[]): Wi
 
 const above = (x: number, z: number, clearance: number) => new Vector3(x, ground(x, z) + clearance, z);
 
-export const WIND: WindPath[] = [
-  // Down the canyon and out to sea.
-  makePath("tunnel", 26, [above(-40, -90, 40), above(180, 70, 34), above(470, 190, 30), above(760, 390, 30), above(1130, 560, 34), above(1500, 700, 40)]),
+// Currents of air that run along the land. They're placed first, and everything else
+// keeps out of their way.
+const TUNNELS: WindPath[] = [
+  // Picks up the river a little below the falls, leaving the pool and the cave mouth calm,
+  // and follows it all the way out to the sea.
+  makePath("tunnel", 26, [...RIVER.filter((_, i) => i >= 14 && i % 6 === 0).map((p) => new Vector3(p.x, p.y + 9, p.z)), new Vector3(1400, 22, 660)]),
   // A long loop around the summit.
   makePath(
     "tunnel",
@@ -103,10 +106,50 @@ export const WIND: WindPath[] = [
   ),
   // Village to village across the west.
   makePath("tunnel", 26, [above(VILLAGES[1].x, VILLAGES[1].z, 70), above(-720, 680, 110), above(-1100, 420, 120), above(VILLAGES[2].x, VILLAGES[2].z, 80)]),
-  // From the south village up to the high ridge.
-  makePath("tunnel", 28, [above(VILLAGES[3].x, VILLAGES[3].z, 60), above(-420, -900, 200), above(-300, -660, 300), above(SUMMIT.x + 90, SUMMIT.z - 120, 40)]),
+  // From the south village toward the high ridge, letting you go before the summit loop.
+  (() => {
+    const v = VILLAGES[3];
+    const dx = v.x - SUMMIT.x;
+    const dz = v.z - SUMMIT.z;
+    const d = Math.hypot(dx, dz);
+    const end = { x: SUMMIT.x + (dx / d) * 560, z: SUMMIT.z + (dz / d) * 560 };
+    const mid = { x: (v.x + end.x) / 2 + 60, z: (v.z + end.z) / 2 };
+    return makePath("tunnel", 28, [above(v.x, v.z, 60), above(mid.x, mid.z, 150), above(end.x, end.z, 180)]);
+  })(),
+];
+
+/** How far a spot is from the nearest current, measured across the ground. */
+function clearOf(x: number, z: number, paths: WindPath[]) {
+  let best = Infinity;
+  for (const path of paths) {
+    for (const s of path.samples) best = Math.min(best, Math.hypot(s.x - x, s.z - z) - path.radius);
+  }
+  return best;
+}
+
+/** Walks outward from a spot until it finds open air, and stays as close as it can. */
+function openSpot(x: number, z: number, need: number, paths: WindPath[]) {
+  for (let ring = 0; ring < 40; ring++) {
+    const d = ring * 25;
+    const tries = Math.max(1, ring * 6);
+    for (let i = 0; i < tries; i++) {
+      const a = (i / tries) * Math.PI * 2 + ring;
+      const px = x + Math.cos(a) * d;
+      const pz = z + Math.sin(a) * d;
+      if (Math.hypot(px - FALLS.x, pz - FALLS.z) < 220) continue;
+      if (clearOf(px, pz, paths) >= need) return { x: px, z: pz };
+    }
+  }
+  return { x, z };
+}
+
+const UPDRAFT_RADIUS = 46;
+const UPDRAFT_GAP = 90;
+
+function placeUpdrafts() {
+  const paths = [...TUNNELS];
   // Rising air, so a player at the bottom can ride straight to the top.
-  ...[
+  const wanted = [
     [PLACES.shore.x + 40, PLACES.shore.z - 80, 520],
     [SUMMIT.x + 240, SUMMIT.z + 300, 620],
     [420, -40, 460],
@@ -115,5 +158,23 @@ export const WIND: WindPath[] = [
     [960, 300, 380],
     [-1000, -120, 400],
     [150, 1130, 380],
-  ].map(([x, z, h]) => makePath("updraft", 46, [above(x, z, 4), above(x + 6, z + 4, h * 0.5), above(x, z, h)])),
-];
+  ];
+  for (const [x, z, h] of wanted) {
+    const spot = openSpot(x, z, UPDRAFT_RADIUS + UPDRAFT_GAP, paths);
+    paths.push(makePath("updraft", UPDRAFT_RADIUS, [above(spot.x, spot.z, 4), above(spot.x + 6, spot.z + 4, h * 0.5), above(spot.x, spot.z, h)]));
+  }
+  return paths;
+}
+
+export const WIND: WindPath[] = placeUpdrafts();
+
+// Balloons drift clear of the currents, so they never sit in the way of one.
+for (const b of BALLOONS) {
+  const spot = openSpot(b.base.x, b.base.z, b.radius + 22, WIND);
+  if (spot.x !== b.base.x || spot.z !== b.base.z) {
+    b.base.y += ground(spot.x, spot.z) - ground(b.base.x, b.base.z);
+    b.base.x = spot.x;
+    b.base.z = spot.z;
+    b.base.y = Math.max(b.base.y, ground(spot.x, spot.z) + 50);
+  }
+}

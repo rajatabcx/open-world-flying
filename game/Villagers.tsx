@@ -6,7 +6,7 @@ import { BoxGeometry, BufferGeometry, ConeGeometry, CylinderGeometry, Float32Buf
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { flight } from "./flight";
 import { PEOPLE } from "./people";
-import { FOG_GLSL, paint, shared } from "./shared";
+import { bindUniforms, FOG_GLSL, paint, shared } from "./shared";
 import { heightAt } from "./terrain";
 
 const CLOTH = 0;
@@ -99,6 +99,7 @@ export function People() {
     <instancedMesh ref={ref} args={[geometry, undefined, PEOPLE.length]} frustumCulled={false} castShadow>
       <shaderMaterial
         uniforms={shared}
+        ref={bindUniforms(shared)}
         vertexShader={/* glsl */ `
           attribute float aPart;
           attribute vec3 aTint;

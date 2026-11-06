@@ -1,4 +1,4 @@
-import { heightAt, rng, VILLAGES } from "./terrain";
+import { FALLS, heightAt, riverSurface, rng, VILLAGES } from "./terrain";
 
 // Where everything in the villages stands. The meshes, the people, the errands and the
 // landing spots all read from this one plan, so they always agree.
@@ -87,4 +87,27 @@ export function fromLocal(b: { x: number; z: number; yaw: number }, x: number, z
 export function doorstep(home: Home, out = 3.4) {
   const p = fromLocal(home, 0, home.d / 2 + out);
   return { x: p.x, y: heightAt(p.x, p.z), z: p.z };
+}
+
+/** The highest thing you could set down on here, or null over water. */
+export function landingHeight(x: number, z: number) {
+  const ground = heightAt(x, z);
+  if (ground < 0.8 || riverSurface(x, z) !== null) return null;
+  if (Math.hypot(x - FALLS.x, z - FALLS.z) < FALLS.r + 2) return null;
+  let top = ground;
+  for (const home of HOMES) {
+    const dx = x - home.x;
+    const dz = z - home.z;
+    if (dx * dx + dz * dz > 120) continue;
+    const c = Math.cos(home.yaw);
+    const s = Math.sin(home.yaw);
+    const lx = Math.abs(dx * c - dz * s);
+    const lz = Math.abs(dx * s + dz * c);
+    const halfW = home.w / 2 + 0.6;
+    const halfD = home.d / 2 + 0.6;
+    if (lx > halfW || lz > halfD) continue;
+    const rise = home.flat ? 0.7 : home.roofHeight * (1 - Math.max(lx / halfW, lz / halfD));
+    top = Math.max(top, home.y + home.h + (home.flat ? 0 : 0.05) + rise);
+  }
+  return top;
 }

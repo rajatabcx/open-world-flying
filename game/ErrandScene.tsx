@@ -5,7 +5,7 @@ import { useMemo, useRef } from "react";
 import { AdditiveBlending, BufferGeometry, CylinderGeometry, DoubleSide, Float32BufferAttribute, Group, InstancedMesh, Mesh, Object3D, Points, Quaternion, Shape, ShapeGeometry, Vector3 } from "three";
 import { errands } from "./errands";
 import { flight } from "./flight";
-import { parcelGeometry } from "./People";
+import { parcelGeometry } from "./Villagers";
 import { glowTexture } from "./shared";
 
 const dummy = new Object3D();
@@ -46,20 +46,24 @@ function Beacons() {
         vertexShader={/* glsl */ `
           varying float vUp;
           varying float vDist;
+          varying float vFace;
           void main() {
             vUp = uv.y;
             vec4 view = viewMatrix * modelMatrix * instanceMatrix * vec4(position, 1.0);
             vDist = -view.z;
+            vec3 n = normalize(mat3(viewMatrix) * mat3(modelMatrix) * mat3(instanceMatrix) * normal);
+            vFace = abs(dot(n, normalize(-view.xyz)));
             gl_Position = projectionMatrix * view;
           }
         `}
         fragmentShader={/* glsl */ `
           varying float vUp;
           varying float vDist;
+          varying float vFace;
           void main() {
-            // Fades as it rises, and melts away as you arrive so it never blocks the view.
-            float a = pow(1.0 - vUp, 2.2) * smoothstep(15.0, 110.0, vDist);
-            gl_FragColor = vec4(1.0, 0.8, 0.42, a * 0.55);
+            // Soft at its edges, fading as it rises, and gone by the time you arrive.
+            float a = pow(1.0 - vUp, 2.2) * smoothstep(50.0, 320.0, vDist) * vFace * vFace;
+            gl_FragColor = vec4(1.0, 0.72, 0.3, a * 0.5);
           }
         `}
       />

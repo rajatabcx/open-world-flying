@@ -1,4 +1,4 @@
-import { BufferGeometry, CanvasTexture, Color, Float32BufferAttribute, type Texture } from "three";
+import { BufferGeometry, CanvasTexture, Color, Float32BufferAttribute, type ShaderMaterial, type Texture } from "three";
 import { FOG_FAR, FOG_NEAR, HORIZON, SUN } from "./world";
 
 // One clock and one set of fog values, shared by every custom shader.
@@ -12,6 +12,10 @@ export const shared = {
   uKey: { value: new Color(1.0, 0.94, 0.84) },
   uAmbient: { value: new Color(0.62, 0.64, 0.62) },
   uNight: { value: 0 },
+  uSkyMid: { value: new Color(0.42, 0.68, 0.9) },
+  uSkyTop: { value: new Color(0.24, 0.5, 0.82) },
+  uDisc: { value: new Color(1, 0.86, 0.62) },
+  uMoon: { value: 0 },
 };
 
 export const FOG_GLSL = /* glsl */ `
@@ -22,6 +26,16 @@ export const FOG_GLSL = /* glsl */ `
     return mix(col, uFogColor, smoothstep(uFogNear, uFogFar, dist));
   }
 `;
+
+/**
+ * React Three Fiber copies the `uniforms` prop, so plain numbers in it stop updating.
+ * Pass this as the material's ref alongside `uniforms` to keep them live.
+ */
+export const bindUniforms =
+  (uniforms: Record<string, { value: unknown }>) =>
+  (material: ShaderMaterial | null) => {
+    if (material) material.uniforms = uniforms as ShaderMaterial["uniforms"];
+  };
 
 const scratch = new Color();
 

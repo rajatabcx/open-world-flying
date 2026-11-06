@@ -1,7 +1,8 @@
 import { deliveredSound, pickupSound } from "./audio";
 import { flight } from "./flight";
 import { PEOPLE, type Person } from "./people";
-import { rng, VILLAGES } from "./terrain";
+import { secretPlaces } from "./photo";
+import { caveAt, rng, VILLAGES } from "./terrain";
 import { VILLAGE_NAMES } from "./villages";
 
 // Deliveries are always optional. There's no timer or score, and nothing can go wrong:
@@ -91,6 +92,7 @@ export function dropParcel() {
 export function stepErrands(time: number) {
   if (errands.offers.length === 0 && !errands.carrying) setUp();
   if (!flight.flying) return;
+  noticeSecrets(time);
 
   const parcel = errands.carrying;
   if (parcel) {
@@ -116,6 +118,22 @@ export function stepErrands(time: number) {
     offer.to.calling = true;
     say(`${offer.giver.name} hands you ${offer.item} for ${offer.to.name} in ${VILLAGE_NAMES[offer.to.village]}. Follow the golden bird. X sets it down.`, time, 9);
     pickupSound();
+  }
+}
+
+const found = new Set<string>();
+
+/** A quiet note the first time you come across somewhere special. */
+function noticeSecrets(time: number) {
+  for (const place of secretPlaces()) {
+    if (found.has(place.name) || Math.hypot(flight.pos.x - place.x, flight.pos.z - place.z) > place.reach) continue;
+    found.add(place.name);
+    say(place.name, time, 5);
+  }
+  const cave = flight.cave > 0.6 ? caveAt(flight.pos.x, flight.pos.z) : null;
+  if (cave && !found.has(cave.cave.name)) {
+    found.add(cave.cave.name);
+    say(cave.cave.name, time, 5);
   }
 }
 
