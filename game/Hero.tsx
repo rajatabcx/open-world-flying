@@ -336,16 +336,18 @@ export function Hero({ lightRef }: { lightRef: React.RefObject<DirectionalLight 
     const mixer = new AnimationMixer(scene);
     const clip = (name: string) => animations.find((a) => a.name.endsWith(`|${name}`));
     const walkClip = clip("Walk");
+    const runClip = clip("Run");
     const giveClip = clip("Interact");
     const walk = walkClip ? mixer.clipAction(walkClip) : null;
+    const run = runClip ? mixer.clipAction(runClip) : null;
     const give = giveClip ? mixer.clipAction(giveClip) : null;
     if (give) {
       give.setLoop(LoopOnce, 1);
       give.clampWhenFinished = false;
     }
-    return { mixer, walk, give };
+    return { mixer, walk, run, give };
   }, [scene, animations]);
-  const moving = useRef({ weight: 0, lastGesture: 0 });
+  const moving = useRef({ weight: 0, run: 0, heading: 0, lastGesture: 0 });
   const posed = useRef(false);
   const root = useRef<Group>(null!);
   const body = useRef<Group>(null!);
@@ -467,17 +469,29 @@ export function Hero({ lightRef }: { lightRef: React.RefObject<DirectionalLight 
     upright.current += ((resting ? Math.PI / 2 : hover * 1.32) - upright.current) * (1 - Math.exp(-3 * dt));
     // Knees bend and arms drop to sit down, and stretch out again for flight.
     sitting.current += ((isSitting() ? 1 : 0) - sitting.current) * (1 - Math.exp(-3.5 * dt));
-    // Walking plays the model's own walk cycle, sped up or slowed to match your steps.
-    const walking = flight.resting ? Math.min(1, Math.abs(flight.walk) / 2) : 0;
+    // On foot, the model's own walk and run cycles play, matched to how fast you're going.
     const move = moving.current;
-    move.weight += (walking - move.weight) * (1 - Math.exp(-8 * dt));
-    if (moves.walk) {
-      if (move.weight > 0.01) {
-        if (!moves.walk.isRunning()) moves.walk.play();
-        moves.walk.setEffectiveWeight(move.weight);
-        moves.walk.setEffectiveTimeScale(Math.sign(flight.walk || 1) * Math.max(0.6, Math.abs(flight.walk) / 3));
-      } else if (moves.walk.isRunning()) moves.walk.stop();
+    const pace = flight.resting ? Math.hypot(flight.walk, flight.strafe) : 0;
+    const backing = flight.walk < -0.05;
+    move.weight += (Math.min(1, pace / 1.6) - move.weight) * (1 - Math.exp(-8 * dt));
+    move.run += (Math.min(1, Math.max(0, (pace - 3.6) / 3)) - move.run) * (1 - Math.exp(-6 * dt));
+    const cycles: [typeof moves.walk, number, number][] = [
+      [moves.walk, move.weight * (1 - move.run), pace / 3],
+      [moves.run, move.weight * move.run, pace / 7.5],
+    ];
+    for (const [action, weight, speed] of cycles) {
+      if (!action) continue;
+      if (weight > 0.01) {
+        if (!action.isRunning()) action.play();
+        action.setEffectiveWeight(weight);
+        action.setEffectiveTimeScale((backing ? -1 : 1) * Math.max(0.6, speed));
+      } else if (action.isRunning()) action.stop();
     }
+    // The body turns toward where you're stepping, so a sidestep is a walk, not a slide.
+    // Stepping back, you keep facing forward and walk backwards.
+    const heading = pace > 0.3 ? (backing ? Math.atan2(-flight.strafe, -flight.walk) : Math.atan2(flight.strafe, flight.walk)) : 0;
+    move.heading += (heading - move.heading) * (1 - Math.exp(-7 * dt));
+    root.current.quaternion.setFromEuler(euler.set(flight.pitch, flight.yaw - move.heading, flight.roll));
     if (moves.give && errands.gesture > move.lastGesture) {
       move.lastGesture = errands.gesture;
       moves.give.reset().setEffectiveWeight(1).fadeIn(0.2).play();

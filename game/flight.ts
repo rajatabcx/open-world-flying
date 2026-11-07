@@ -75,6 +75,8 @@ export const flight = {
   wings: 0,
   /** Walking speed on the ground, backwards when negative. */
   walk: 0,
+  /** Sideways stepping speed on the ground, to the right when positive. */
+  strafe: 0,
 };
 
 /** Trees that were just hit, for the leaves and the shaking to pick up. */
@@ -121,6 +123,7 @@ function settle(top: number) {
   flight.folded = false;
   flight.launching = 0;
   flight.walk = 0;
+  flight.strafe = 0;
   flight.vy = 0;
   flight.speed = 0;
   flight.pitch = 0;
@@ -166,11 +169,14 @@ export function isSitting() {
 }
 
 const WALK = 3.4;
-const WALK_BACK = 1.6;
+const RUN = 7.5;
+const WALK_BACK = 1.8;
+const SIDESTEP = 2.4;
 
 /**
- * On your feet: W or the up arrow walks, S steps back, and left and right turn.
- * Shift, Space or the down arrow throws the wings open and takes off again.
+ * On your feet: W or up walks forward, S or down steps back, A and D step sideways, and the
+ * left and right arrows (or a mouse drag) turn. Shift runs. Only Space takes off again, so
+ * nothing else can lift you off your feet by accident.
  */
 function stepRest(dt: number) {
   flight.mode = "rest";
@@ -179,22 +185,24 @@ function stepRest(dt: number) {
   flight.wind = damp(flight.wind, 0, 2, dt);
   flight.pitch = damp(flight.pitch, 0, 4, dt);
   flight.roll = damp(flight.roll, 0, 4, dt);
-  const free = !flight.busy && flight.launching <= 0;
-  flight.turn = damp(flight.turn, free ? input.x : 0, 6, dt);
-  flight.yaw -= flight.turn * 1.7 * dt;
+  const free = !flight.busy && flight.launching <= 0 && flight.restTime > 0.4;
+  flight.turn = damp(flight.turn, free ? input.turn : 0, 8, dt);
+  flight.yaw -= flight.turn * 2 * dt;
   flight.dir.set(-Math.sin(flight.yaw), 0, -Math.cos(flight.yaw));
   flight.restTime += dt;
   flight.shaken = Math.max(0, flight.shaken - dt * 1.4);
 
-  const forward = input.throttle > 0 || input.y < -0.2 ? 1 : input.throttle < 0 ? -1 : 0;
-  const want = free && flight.restTime > 0.4 ? (forward > 0 ? WALK : forward < 0 ? -WALK_BACK : 0) : 0;
-  flight.walk = damp(flight.walk, want, 8, dt);
-  if (Math.abs(flight.walk) > 0.05) {
-    flight.restTime = 0.5;
-    stepWalk(flight.walk * dt);
+  const ahead = free ? input.walk : 0;
+  const wantWalk = ahead > 0 ? (input.run ? RUN : WALK) : ahead < 0 ? -WALK_BACK : 0;
+  flight.walk = damp(flight.walk, wantWalk, 8, dt);
+  flight.strafe = damp(flight.strafe, free ? input.strafe * (input.run ? SIDESTEP * 1.6 : SIDESTEP) : 0, 8, dt);
+  const moving = Math.abs(flight.walk) > 0.05 || Math.abs(flight.strafe) > 0.05;
+  if (moving) {
+    flight.restTime = Math.min(flight.restTime, 0.5);
+    stepWalk(flight.walk * dt, flight.strafe * dt);
   }
   // Land standing, and after a while sit down to take in the view.
-  flight.pos.y = damp(flight.pos.y, flight.restY + (isSitting() ? 0.36 : 1.5), Math.abs(flight.walk) > 0.05 ? 14 : 2.4, dt);
+  flight.pos.y = damp(flight.pos.y, flight.restY + (isSitting() ? 0.36 : 1.5), moving ? 14 : 2.4, dt);
   // Taking off, the wings unpack first, then one strong beat lifts you off your feet.
   if (flight.launching > 0) {
     flight.launching -= dt;
@@ -203,6 +211,7 @@ function stepRest(dt: number) {
       flight.resting = false;
       flight.hovering = false;
       flight.walk = 0;
+      flight.strafe = 0;
       flight.speed = 18;
       flight.impulse.set(0, 19, 0);
       wingBeatSound(1);
@@ -210,13 +219,16 @@ function stepRest(dt: number) {
     return;
   }
   flight.wings = damp(flight.wings, 0, 5, dt);
-  if (!flight.busy && flight.restTime > 0.6 && (input.boost || input.y > 0.2)) flight.launching = 0.45;
+  if (!flight.busy && flight.restTime > 0.4 && input.jump) flight.launching = 0.45;
 }
 
 /** One step along the ground. Walls, steep rock, trees and water stop you, and you slide along them. */
-function stepWalk(distance: number) {
-  const dx = -Math.sin(flight.yaw) * distance;
-  const dz = -Math.cos(flight.yaw) * distance;
+function stepWalk(forward: number, side: number) {
+  const fx = -Math.sin(flight.yaw);
+  const fz = -Math.cos(flight.yaw);
+  // To the right of facing (fx, fz) is (-fz, fx).
+  const dx = fx * forward - fz * side;
+  const dz = fz * forward + fx * side;
   if (tryStep(dx, dz)) return;
   // Blocked straight ahead, so try sliding along whatever's in the way.
   if (Math.abs(dx) > Math.abs(dz)) {

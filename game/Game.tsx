@@ -128,6 +128,7 @@ export default function Game() {
   const [talk, setTalk] = useState<Talk | null>(null);
   const [warning, setWarning] = useState(false);
   const [folded, setFolded] = useState(false);
+  const [onFoot, setOnFoot] = useState(false);
   const [photoMode, setPhotoMode] = useState(false);
   const [album, setAlbum] = useState<Postcard[] | null>(null);
   const [flash, setFlash] = useState(false);
@@ -151,6 +152,7 @@ export default function Game() {
       setTalk(errands.talk);
       setWarning(flight.warning > 0.35);
       setFolded(flight.folded);
+      setOnFoot(flight.resting);
     }, 120);
     return () => clearInterval(id);
   }, [flying]);
@@ -314,7 +316,8 @@ export default function Game() {
             <p><b className="font-semibold">W</b> flap forward · let go to glide · <b className="font-semibold">S</b> brake to a hover</p>
             <p><b className="font-semibold">Shift</b> boost · or drag the mouse to steer</p>
             <p><b className="font-semibold">Q</b> pack the wings away and drop · any flying key throws them open again</p>
-            <p><b className="font-semibold">E</b> land · on the ground <b className="font-semibold">W</b> walks, <b className="font-semibold">Shift</b> takes off · <b className="font-semibold">F</b> talk to someone</p>
+            <p><b className="font-semibold">E</b> land · on foot <b className="font-semibold">W A S D</b> walk, <b className="font-semibold">← →</b> turn, <b className="font-semibold">Shift</b> run</p>
+            <p><b className="font-semibold">Space</b> take off again · <b className="font-semibold">F</b> talk to someone</p>
             <p><b className="font-semibold">P</b> photo · <b className="font-semibold">T</b> move the day along · <b className="font-semibold">M</b> sound · <b className="font-semibold">H</b> show or hide this</p>
             <p className="mt-1 text-white/80">See a golden glow? Someone has a parcel. Land nearby, walk up and talk to them, if you feel like carrying it.</p>
           </div>
@@ -407,9 +410,21 @@ export default function Game() {
                 Talk
               </button>
             )}
-            <button onClick={toggleWings} className="h-16 w-16 rounded-full bg-white/30 text-xs font-medium text-white backdrop-blur active:bg-white/50">
-              {folded ? "Open" : "Drop"}
-            </button>
+            {onFoot ? (
+              <button
+                onPointerDown={() => press("Space", true)}
+                onPointerUp={() => press("Space", false)}
+                onPointerCancel={() => press("Space", false)}
+                onPointerLeave={() => press("Space", false)}
+                className="h-16 w-16 rounded-full bg-white/30 text-xs font-medium text-white backdrop-blur active:bg-white/50"
+              >
+                Fly
+              </button>
+            ) : (
+              <button onClick={toggleWings} className="h-16 w-16 rounded-full bg-white/30 text-xs font-medium text-white backdrop-blur active:bg-white/50">
+                {folded ? "Open" : "Drop"}
+              </button>
+            )}
             {[
               ["KeyS", "Brake"],
               ["KeyW", "Flap"],

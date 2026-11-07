@@ -166,11 +166,31 @@ function placeUpdrafts() {
   return paths;
 }
 
-export const WIND: WindPath[] = placeUpdrafts();
+/** Every place a current can blow. Only some of them blow on any one visit. */
+const ALL_WIND: WindPath[] = placeUpdrafts();
 
-// Balloons drift clear of the currents, so they never sit in the way of one.
+/** A few of a list, in random order. */
+function someOf<T>(list: T[], count: number) {
+  const pool = [...list];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, count);
+}
+
+// Each time the game loads, the wind picks a handful of its currents and rising air, so
+// the sky feels different from one visit to the next and is never crowded with them.
+export const WIND: WindPath[] = (() => {
+  const tunnels = ALL_WIND.filter((w) => w.kind === "tunnel");
+  const updrafts = ALL_WIND.filter((w) => w.kind === "updraft");
+  return [...someOf(tunnels, 2 + Math.floor(Math.random() * 2)), ...someOf(updrafts, 3 + Math.floor(Math.random() * 2))];
+})();
+
+// Balloons drift clear of every place a current could blow, so the island stays the same
+// whichever ones are blowing today.
 for (const b of BALLOONS) {
-  const spot = openSpot(b.base.x, b.base.z, b.radius + 22, WIND);
+  const spot = openSpot(b.base.x, b.base.z, b.radius + 22, ALL_WIND);
   if (spot.x !== b.base.x || spot.z !== b.base.z) {
     b.base.y += ground(spot.x, spot.z) - ground(b.base.x, b.base.z);
     b.base.x = spot.x;

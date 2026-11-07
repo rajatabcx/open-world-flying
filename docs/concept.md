@@ -30,7 +30,7 @@ Flying works like a bird's, but you can never fall out of the sky.
 
 - **Hot air balloons** to bounce off
 - **Clouds** to fly through
-- **Wind tunnels and wind** that give you a boost
+- **Wind tunnels and rising air** that give you a boost. Each visit only a handful are blowing, a different few every time
 - **Mountains** to start from or climb to
 - **Homes** to deliver between
 
@@ -55,7 +55,8 @@ Everything here is optional. There are no timers, scores or ways to fail.
 | Key | Action |
 |---|---|
 | E | Land on the ground or a rooftop |
-| W, S, A, D (on the ground) | Walk, step back and turn. Shift, Space or ↓ takes off |
+| On foot: W/↑, S/↓, A, D | Walk forward, step back, step left and right. ← → turn, Shift runs |
+| On foot: Space | Take off again. It's the only key that does |
 | P | Photo mode. Arrows move the camera, W and S zoom, Enter takes the photo |
 | Q | Pack the wings away and drop, or open them again |
 | F | Talk to someone you've landed beside |

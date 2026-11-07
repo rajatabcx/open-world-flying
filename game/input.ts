@@ -1,4 +1,19 @@
-export const input = { x: 0, y: 0, throttle: 0, boost: false };
+export const input = {
+  x: 0,
+  y: 0,
+  throttle: 0,
+  boost: false,
+  /** On foot: A and D step sideways. */
+  strafe: 0,
+  /** On foot: the left and right arrows, or a mouse drag, turn you. */
+  turn: 0,
+  /** On foot: W or up walks forward, S or down steps back. */
+  walk: 0,
+  /** On foot: Shift breaks into a run. */
+  run: false,
+  /** On foot: Space is the one key that takes off. */
+  jump: false,
+};
 
 const held = new Set<string>();
 let drag = { x: 0, y: 0 };
@@ -14,6 +29,11 @@ function refresh() {
   input.y = ky || drag.y;
   input.throttle = (held.has("KeyW") ? 1 : 0) - (held.has("KeyS") ? 1 : 0);
   input.boost = held.has("ShiftLeft") || held.has("ShiftRight") || held.has("Space");
+  input.strafe = (held.has("KeyD") ? 1 : 0) - (held.has("KeyA") ? 1 : 0);
+  input.turn = (held.has("ArrowRight") ? 1 : 0) - (held.has("ArrowLeft") ? 1 : 0) || drag.x;
+  input.walk = (held.has("KeyW") || held.has("ArrowUp") ? 1 : 0) - (held.has("KeyS") || held.has("ArrowDown") ? 1 : 0) || -drag.y;
+  input.run = held.has("ShiftLeft") || held.has("ShiftRight");
+  input.jump = held.has("Space");
 }
 
 /** Used by the on-screen touch buttons, which act like held keys. */
