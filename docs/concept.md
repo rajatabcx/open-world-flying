@@ -64,7 +64,7 @@ Everything here is optional. There are no timers, scores or ways to fail.
 
 ### Deliveries
 
-A golden glow marks someone holding a parcel, with a golden circle on the ground around them. Land nearby, walk up into the circle and talk to them (F). They share a piece of the island's story, then tell you what it is and who it's for, and you can say yes or not today. Once you've taken it, it stays with you: you can stop and rest anywhere, but you can't leave it somewhere. Follow the golden bird, land near the person waiting, walk up and hand it over. They tell you a little more of the story too. A lantern then goes up by their door.
+A golden glow marks someone holding a parcel, with a golden circle on the ground around them. Land nearby, walk up into the circle and talk to them (F). They share a piece of the island's story, then tell you what it is and who it's for, and you can say yes or not today. Once you've taken it, it stays with you: you can stop and rest anywhere, but you can't leave it somewhere. Follow the golden arrow at the top of the screen (and the golden bird), land near the person waiting, walk up and hand it over. They tell you a little more of the story too. A lantern then goes up by their door.
 
 ### Wings
 

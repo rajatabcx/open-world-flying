@@ -10,6 +10,7 @@ import { weather, startShower } from "./weather";
 import { audioState, renderForTest, setMuted, startAudio, stopAudio } from "./audio";
 import { answerNo, answerYes, captionNow, errands, startTalk, talkable, type Talk } from "./errands";
 import { Errands } from "./ErrandScene";
+import { GuideArrow } from "./GuideArrow";
 import { canLand, flight, land, startAt, toggleWings } from "./flight";
 import { enterPhoto, leavePhoto, loadPostcards, makePostcard, placeName, savePostcards, type Postcard } from "./photo";
 import { Ruin } from "./Ruin";
@@ -321,6 +322,7 @@ export default function Game() {
             <p><b className="font-semibold">P</b> photo · <b className="font-semibold">T</b> move the day along · <b className="font-semibold">M</b> sound · <b className="font-semibold">H</b> show or hide this</p>
             <p className="mt-1 text-white/80">See a golden glow? Someone has a parcel. Land nearby, walk up and talk to them, if you feel like carrying it.</p>
           </div>
+          <GuideArrow />
           {warning && !talk && (
             <div role="status" className="pointer-events-none absolute inset-x-0 top-1/3 flex justify-center">
               <div className="animate-pulse rounded-full bg-amber-400/80 px-5 py-2 text-sm font-semibold tracking-wide text-slate-900 shadow-lg backdrop-blur">

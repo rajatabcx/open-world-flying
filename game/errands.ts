@@ -159,7 +159,7 @@ export function answerYes() {
     errands.carrying = offer;
     offer.giver.calling = false;
     offer.to.calling = true;
-    say(`${offer.item} for ${offer.to.name} in ${VILLAGE_NAMES[offer.to.village]}. Follow the golden bird, then land beside them.`, time, 8);
+    say(`${offer.item} for ${offer.to.name} in ${VILLAGE_NAMES[offer.to.village]}. Follow the arrow at the top, then land nearby and walk over.`, time, 8);
     pickupSound();
   } else {
     const parcel = talk.offer;
