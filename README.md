@@ -1,36 +1,37 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Aloft
 
-## Getting Started
+A relaxing open-world game about flying. On this island, the water carries the **lume**, a faint glow that taught the first families to hear the wind. Generations later, everyone flies on wings that fold into a pack on their back.
 
-First, run the development server:
+There's nothing you have to do. Glide over hills, ride the wind, drop into caves, or land and walk around the villages. If you like, carry parcels between neighbours and hear the island's story a piece at a time. There are no timers, scores or ways to fail.
+
+## Controls
+
+| In the air | |
+|---|---|
+| W | Flap forward (let go to glide) |
+| ↓ / ↑ | Climb / dive |
+| A, D or ← → | Turn |
+| Shift | Boost |
+| S | Brake to a hover |
+| Q | Pack the wings away and drop |
+| E | Land |
+
+| On foot | |
+|---|---|
+| W A S D | Walk |
+| ← → | Turn |
+| Shift | Run |
+| F | Talk to someone |
+| Space | Take off |
+
+## Run it
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+```bash
+pnpm dev
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Then open http://localhost:3000. Built with Next.js and React Three Fiber. The full concept is in [docs/concept.md](docs/concept.md).
