@@ -168,10 +168,12 @@ export function isSitting() {
   return flight.resting && flight.restTime > 6 && !flight.busy && flight.launching <= 0;
 }
 
-const WALK = 3.4;
-const RUN = 7.5;
-const WALK_BACK = 1.8;
-const SIDESTEP = 2.4;
+// The hero stands three metres tall, so these paces are brisk enough to get around a
+// village quickly without the walk turning into a chore.
+const WALK = 6.5;
+const RUN = 14;
+const WALK_BACK = 3.5;
+const SIDESTEP = 5;
 
 /**
  * On your feet: W or up walks forward, S or down steps back, A and D step sideways, and the
@@ -194,8 +196,8 @@ function stepRest(dt: number) {
 
   const ahead = free ? input.walk : 0;
   const wantWalk = ahead > 0 ? (input.run ? RUN : WALK) : ahead < 0 ? -WALK_BACK : 0;
-  flight.walk = damp(flight.walk, wantWalk, 8, dt);
-  flight.strafe = damp(flight.strafe, free ? input.strafe * (input.run ? SIDESTEP * 1.6 : SIDESTEP) : 0, 8, dt);
+  flight.walk = damp(flight.walk, wantWalk, 10, dt);
+  flight.strafe = damp(flight.strafe, free ? input.strafe * (input.run ? SIDESTEP * 1.7 : SIDESTEP) : 0, 10, dt);
   const moving = Math.abs(flight.walk) > 0.05 || Math.abs(flight.strafe) > 0.05;
   if (moving) {
     flight.restTime = Math.min(flight.restTime, 0.5);

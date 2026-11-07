@@ -473,11 +473,11 @@ export function Hero({ lightRef }: { lightRef: React.RefObject<DirectionalLight 
     const move = moving.current;
     const pace = flight.resting ? Math.hypot(flight.walk, flight.strafe) : 0;
     const backing = flight.walk < -0.05;
-    move.weight += (Math.min(1, pace / 1.6) - move.weight) * (1 - Math.exp(-8 * dt));
-    move.run += (Math.min(1, Math.max(0, (pace - 3.6) / 3)) - move.run) * (1 - Math.exp(-6 * dt));
+    move.weight += (Math.min(1, pace / 2.5) - move.weight) * (1 - Math.exp(-8 * dt));
+    move.run += (Math.min(1, Math.max(0, (pace - 7.5) / 5)) - move.run) * (1 - Math.exp(-6 * dt));
     const cycles: [typeof moves.walk, number, number][] = [
-      [moves.walk, move.weight * (1 - move.run), pace / 3],
-      [moves.run, move.weight * move.run, pace / 7.5],
+      [moves.walk, move.weight * (1 - move.run), pace / 5.2],
+      [moves.run, move.weight * move.run, pace / 11],
     ];
     for (const [action, weight, speed] of cycles) {
       if (!action) continue;
@@ -568,7 +568,8 @@ export function Hero({ lightRef }: { lightRef: React.RefObject<DirectionalLight 
     lookNow.lerp(lookTarget, flight.flying ? 1 - Math.exp(-9 * dt) : 1);
     camera.up.set(Math.sin(-flight.roll * 0.16) * Math.cos(flight.yaw), 1, Math.sin(flight.roll * 0.16) * Math.sin(flight.yaw));
     camera.lookAt(lookNow);
-    const fov = 60 + fast * 24 + flight.wind * 6;
+    // Breaking into a run on foot widens the view a little too.
+    const fov = 60 + fast * 24 + flight.wind * 6 + (flight.resting ? moving.current.run * 7 : 0);
     if (Math.abs(camera.fov - fov) > 0.05) {
       camera.fov += (fov - camera.fov) * (1 - Math.exp(-2.5 * dt));
       camera.updateProjectionMatrix();
