@@ -361,24 +361,6 @@ function playThud(out: Output, at: number, strength: number) {
   dust.start(at);
 }
 
-/** Two low, soft notes, a nudge to pull up rather than an alarm. */
-function playWarn(out: Output, at: number) {
-  const { ctx } = out;
-  [69, 64].forEach((note, i) => {
-    const start = at + i * 0.18;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.frequency.value = midi(note);
-    gain.gain.setValueAtTime(0, start);
-    gain.gain.linearRampToValueAtTime(0.09, start + 0.04);
-    gain.gain.exponentialRampToValueAtTime(0.001, start + 0.7);
-    osc.connect(gain);
-    gain.connect(out.sfx);
-    osc.start(start);
-    osc.stop(start + 0.75);
-  });
-}
-
 export type Scene = {
   wind: number;
   windTone: number;
@@ -516,10 +498,6 @@ export function crashSound(strength: number) {
 
 export function thudSound(strength: number) {
   if (context && output) playThud(output, context.currentTime, strength);
-}
-
-export function warnSound() {
-  if (context && output) playWarn(output, context.currentTime);
 }
 
 export function wingBeatSound(strength: number) {

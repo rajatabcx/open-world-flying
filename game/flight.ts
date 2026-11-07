@@ -1,5 +1,5 @@
 import { Vector3 } from "three";
-import { bounceSound, crashSound, thudSound, warnSound, wingBeatSound } from "./audio";
+import { bounceSound, crashSound, thudSound, wingBeatSound } from "./audio";
 import { input } from "./input";
 import { landingHeight } from "./villages";
 import { caveAt, heightAt, LID_HALF, lidHump, PLACES, riverSurface, surfaceAt, type PlaceId } from "./terrain";
@@ -65,8 +65,6 @@ export const flight = {
   vy: 0,
   /** Inside a cave's tunnel, under the rock, rather than on the hill above it. */
   tunnel: false,
-  /** 0 to 1, how urgently the ground ahead says to pull up. */
-  warning: 0,
   /** Counts down while the wings unpack, just before taking off from standing. */
   launching: 0,
   /** Talking with someone, which keeps you on the ground until you're done. */
@@ -127,7 +125,6 @@ function settle(top: number) {
   flight.vy = 0;
   flight.speed = 0;
   flight.pitch = 0;
-  flight.warning = 0;
   flight.impulse.set(0, 0, 0);
 }
 
@@ -393,8 +390,6 @@ function applyTrees() {
 const prev = new Vector3();
 const velocity = new Vector3();
 const normal = new Vector3();
-const ahead = new Vector3();
-let lastWarn = 0;
 
 /** Moves in and out of a cave's tunnel. You can only get in through one of its mouths. */
 function updateTunnel(dt: number) {
@@ -492,45 +487,11 @@ function collideGround(dt: number) {
   }
 }
 
-/** The room left at a point: above the ground, or inside a tunnel's walls and roof. */
-function roomAt(p: Vector3) {
-  if (flight.tunnel) {
-    const at = caveAt(p.x, p.z);
-    if (at && !at.beyond) return Math.min(p.y - at.floor, at.floor + at.cave.roof - p.y, at.cave.half - Math.abs(at.lateral)) - 2;
-  }
-  if (riverSurface(p.x, p.z) !== null || heightAt(p.x, p.z) < 0.5) return Infinity;
-  return p.y - groundTop(p.x, p.z) - CLEARANCE;
-}
-
-/** Looks a couple of seconds down your path, and raises the alarm before a hard knock. */
-function checkAhead(dt: number) {
-  let want = 0;
-  const pace = velocity.length();
-  if (pace > 18) {
-    const now = roomAt(flight.pos);
-    for (let t = 0.3; t <= 2.4; t += 0.3) {
-      ahead.copy(flight.pos).addScaledVector(velocity, t);
-      const room = roomAt(ahead);
-      // Only warn when you'd come in hard, not while gently skimming the grass.
-      if (room < 0 && (now - room) / t > BUMP_SPEED) {
-        want = 1 - (t / 2.4) * 0.6;
-        break;
-      }
-    }
-  }
-  flight.warning = damp(flight.warning, want, want > flight.warning ? 10 : 3, dt);
-  if (want > 0 && flight.clock - lastWarn > 1.4) {
-    lastWarn = flight.clock;
-    warnSound();
-  }
-}
-
 function collide(dt: number) {
   velocity.copy(flight.pos).sub(prev).divideScalar(Math.max(dt, 1e-4));
   const tunnel = updateTunnel(dt);
   if (tunnel) collideTunnel(tunnel, dt);
   collideGround(dt);
-  if (flight.flying && !flight.resting) checkAhead(dt);
 }
 
 export function stepFlight(dt: number, time: number) {

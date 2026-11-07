@@ -127,7 +127,6 @@ export default function Game() {
   const [landable, setLandable] = useState(false);
   const [canTalk, setCanTalk] = useState(false);
   const [talk, setTalk] = useState<Talk | null>(null);
-  const [warning, setWarning] = useState(false);
   const [folded, setFolded] = useState(false);
   const [onFoot, setOnFoot] = useState(false);
   const [photoMode, setPhotoMode] = useState(false);
@@ -151,7 +150,6 @@ export default function Game() {
       setLandable(canLand());
       setCanTalk(!!talkable());
       setTalk(errands.talk);
-      setWarning(flight.warning > 0.35);
       setFolded(flight.folded);
       setOnFoot(flight.resting);
     }, 120);
@@ -323,13 +321,6 @@ export default function Game() {
             <p className="mt-1 text-white/80">See a golden glow? Someone has a parcel. Land nearby, walk up and talk to them, if you feel like carrying it.</p>
           </div>
           <GuideArrow />
-          {warning && !talk && (
-            <div role="status" className="pointer-events-none absolute inset-x-0 top-1/3 flex justify-center">
-              <div className="animate-pulse rounded-full bg-amber-400/80 px-5 py-2 text-sm font-semibold tracking-wide text-slate-900 shadow-lg backdrop-blur">
-                Pull up ↓
-              </div>
-            </div>
-          )}
           {talk && (
             <div className="absolute inset-x-4 bottom-8 mx-auto max-w-md rounded-2xl bg-black/50 px-5 py-4 text-white shadow-xl backdrop-blur pointer-coarse:bottom-40">
               <p className="text-xs uppercase tracking-widest text-amber-200/90">

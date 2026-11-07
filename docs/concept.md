@@ -24,7 +24,7 @@ Flying works like a bird's, but you can never fall out of the sky.
 - **Boost** (Shift) flies level and straight at high speed.
 - **Hover** (S to brake): you stand upright on the air, wings wide open, holding height with slow, heavy beats. Holds until you flap or boost. Keep holding S to drift backward.
 - **Pack the wings away** (Q) to drop like a stone, head first. Any flying key throws them open again and turns the fall into a swoop. Fall all the way down and you land on your feet.
-- **Trees, the ground and cave walls** are solid. Hitting one costs most of your speed and bounces you back a little, but it's never a failure. When the ground is coming up fast, a soft "Pull up" warning sounds first.
+- **Trees, the ground and cave walls** are solid. Hitting one costs most of your speed and bounces you back a little, but it's never a failure.
 
 ## In the world
 
