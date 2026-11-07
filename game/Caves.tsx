@@ -6,14 +6,13 @@ import { AdditiveBlending, BufferGeometry, Color, ConeGeometry, DoubleSide, Floa
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { groundColor } from "./ground";
 import { glowTexture } from "./shared";
-import { CAVE_HALF, CAVE_ROOF, CAVES, fbm, rng, surfaceAt, type Cave } from "./terrain";
+import { CAVE_HALF, CAVE_ROOF, CAVES, fbm, LID_HALF, lidHump, rng, surfaceAt, type Cave } from "./terrain";
 
 // A cave is covered by a lid. Its top copies the hillside, so it can't be seen from
 // outside, and its underside is the rock ceiling you fly beneath.
 
 const LID_ACROSS = 20;
 const ARCH_ACROSS = 22;
-const LID_HALF = CAVE_HALF + 24;
 
 function buildCave(cave: Cave) {
   const positions: number[] = [];
@@ -41,8 +40,8 @@ function buildCave(cave: Cave) {
       const x = p.x + side.x * u * LID_HALF;
       const z = p.z + side.z * u * LID_HALF;
       const ground = surfaceAt(x, z);
-      const inner = Math.abs(u) * LID_HALF < CAVE_HALF + 4;
-      const y = Math.max(ground, inner ? p.floor + CAVE_ROOF + 2.5 : ground - 3) + 0.4;
+      // Where the hill is too thin to hold the tunnel, the rock rises in a rounded hump.
+      const y = Math.max(ground, lidHump(p.floor, u)) + 0.4;
       positions.push(x, y, z);
       // Match the real slope here, so the lid takes the same rock or grass as its surroundings.
       const e = 6;
@@ -93,7 +92,7 @@ function buildCave(cave: Cave) {
       const u = Math.cos(a);
       const topX = p.x + side.x * u * (CAVE_HALF + 14);
       const topZ = p.z + side.z * u * (CAVE_HALF + 14);
-      positions.push(topX, Math.max(surfaceAt(topX, topZ), p.floor + CAVE_ROOF * Math.sin(a) + 3) + 0.4, topZ);
+      positions.push(topX, Math.max(surfaceAt(topX, topZ), p.floor + CAVE_ROOF * Math.sin(a) + 6) + 0.4, topZ);
       c.set("#85745f");
       colors.push(c.r, c.g, c.b);
       if (j < steps) {

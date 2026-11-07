@@ -28,7 +28,8 @@ function buildTerrain() {
       groundColor(c, x, z, h);
       c.multiplyScalar(1 - shade[k] * 0.32);
       // The floor of a cave sits in the dark, whatever the sun's doing.
-      if (caveAt(x, z)) c.multiplyScalar(0.28);
+      const cave = caveAt(x, z);
+      if (cave && cave.distance < cave.cave.half + 14) c.multiplyScalar(0.28);
       colors[k * 3] = c.r;
       colors[k * 3 + 1] = c.g;
       colors[k * 3 + 2] = c.b;

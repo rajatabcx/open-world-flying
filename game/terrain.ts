@@ -148,18 +148,35 @@ export const RIVER: RiverPoint[] = (() => {
   return list;
 })();
 
+const riverScratch: RiverPoint = { x: 0, z: 0, y: 0, width: 0 };
+
+/** The nearest point on the river's centre line, measured to each stretch rather than each sample. */
 function riverAt(x: number, z: number) {
   let best = Infinity;
-  let at = RIVER[0];
-  for (let i = 0; i < RIVER.length - 1; i += 2) {
-    const p = RIVER[i];
-    const d = (x - p.x) * (x - p.x) + (z - p.z) * (z - p.z);
+  let bi = 0;
+  let bt = 0;
+  for (let i = 0; i < RIVER.length - 1; i++) {
+    const a = RIVER[i];
+    const b = RIVER[i + 1];
+    const ex = b.x - a.x;
+    const ez = b.z - a.z;
+    const t = Math.min(1, Math.max(0, ((x - a.x) * ex + (z - a.z) * ez) / (ex * ex + ez * ez)));
+    const qx = x - a.x - ex * t;
+    const qz = z - a.z - ez * t;
+    const d = qx * qx + qz * qz;
     if (d < best) {
       best = d;
-      at = p;
+      bi = i;
+      bt = t;
     }
   }
-  return { d: Math.sqrt(best), at };
+  const a = RIVER[bi];
+  const b = RIVER[bi + 1];
+  riverScratch.x = mix(a.x, b.x, bt);
+  riverScratch.z = mix(a.z, b.z, bt);
+  riverScratch.y = mix(a.y, b.y, bt);
+  riverScratch.width = mix(a.width, b.width, bt);
+  return { d: Math.sqrt(best), at: riverScratch };
 }
 
 /** The water surface under a point on the river, or null if it's dry land. */
@@ -217,13 +234,6 @@ function rawHeight(x: number, z: number) {
 
   const canyon = canyonAt(x, z);
   h = mix(h, canyon.target, smooth(105, 38, canyon.d));
-  if (canyon.d < 200) {
-    const river = riverAt(x, z);
-    if (river.d < river.at.width + 60) {
-      h = mix(h, river.at.y + 1.3, smooth(river.at.width + 50, river.at.width + 6, river.d));
-      h = mix(h, river.at.y - 1.8, smooth(river.at.width + 1, river.at.width * 0.6, river.d));
-    }
-  }
 
   for (const s of STACKS) {
     const d = Math.hypot(x - s.x, z - s.z) / s.r;
@@ -233,6 +243,14 @@ function rawHeight(x: number, z: number) {
     h = Math.max(h, v - 70 * (1 - Math.min(1, v / (s.h * 0.2))));
   }
   h = fallsBowl(x, z, h);
+  // The riverbed is cut last, so nothing piled on afterwards can dam it.
+  if (canyon.d < 200) {
+    const river = riverAt(x, z);
+    if (river.d < river.at.width + 60) {
+      h = mix(h, Math.min(h, river.at.y + 1.3), smooth(river.at.width + 50, river.at.width + 6, river.d));
+      h = mix(h, river.at.y - 1.8, smooth(river.at.width + 1, river.at.width * 0.6, river.d));
+    }
+  }
   const ruin = Math.hypot(x - RUIN.x, z - RUIN.z);
   if (ruin < RUIN.r * 1.7) h = mix(h, RUIN.floor + (fbm(x * 0.05, z * 0.05, 2) - 0.5) * 2.2, smooth(RUIN.r * 1.7, RUIN.r, ruin));
   for (const v of VILLAGES) {
@@ -270,9 +288,17 @@ function fallsBowl(x: number, z: number, h: number) {
 export type CavePoint = { x: number; z: number; floor: number; surface: number };
 export type Cave = { name: string; points: CavePoint[]; half: number; roof: number; minX: number; maxX: number; minZ: number; maxZ: number };
 
-export const CAVE_HALF = 21;
-export const CAVE_ROOF = 25;
+// Wide and tall enough to glide through with your wings spread.
+export const CAVE_HALF = 36;
+export const CAVE_ROOF = 44;
 const CAVE_STEP = 9;
+/** How far either side of a tunnel its rock lid reaches. */
+export const LID_HALF = CAVE_HALF + 24;
+
+/** The least rock over a tunnel: a rounded hump, u across from -1 to 1, that always covers the arch. */
+export function lidHump(floor: number, u: number) {
+  return floor - 3 + (CAVE_ROOF + 9) * Math.sqrt(Math.max(0, 1 - u * u));
+}
 
 function makeCave(name: string, x: number, z: number, angle: number, floor: number, slope: number, maxLength: number): Cave {
   const dx = Math.cos(angle);
@@ -288,7 +314,7 @@ function makeCave(name: string, x: number, z: number, angle: number, floor: numb
     if (surface > f + CAVE_ROOF + 6) buried = true;
     if (buried && surface < f + 8) break;
   }
-  const pad = CAVE_HALF + 20;
+  const pad = LID_HALF + 2;
   return {
     name,
     points,
@@ -318,7 +344,9 @@ export function caveAt(x: number, z: number) {
     let floor = 0;
     let index = 0;
     let lateral = 0;
-    for (let i = 0; i < cave.points.length - 1; i++) {
+    let beyond = false;
+    const last = cave.points.length - 2;
+    for (let i = 0; i <= last; i++) {
       const a = cave.points[i];
       const b = cave.points[i + 1];
       const ex = b.x - a.x;
@@ -332,10 +360,12 @@ export function caveAt(x: number, z: number) {
         floor = mix(a.floor, b.floor, t);
         index = i;
         lateral = (ex * qz - ez * qx) / Math.hypot(ex, ez);
+        // Out past either mouth, rather than under the rock.
+        beyond = (i === 0 && t <= 0) || (i === last && t >= 1);
       }
     }
     const distance = Math.sqrt(bestSq);
-    if (distance < cave.half + 14) return { cave, distance, floor, index, lateral };
+    if (distance < LID_HALF) return { cave, distance, floor, index, lateral, beyond };
   }
   return null;
 }

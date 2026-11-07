@@ -3,9 +3,9 @@
 import { useGLTF } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { AdditiveBlending, Bone, Box3, BufferGeometry, Color, CylinderGeometry, DirectionalLight, DoubleSide, Euler, Float32BufferAttribute, Group, Mesh, MeshDepthMaterial, MeshStandardMaterial, PerspectiveCamera, Quaternion, RGBADepthPacking, ShaderMaterial, Vector3 } from "three";
+import { AdditiveBlending, Bone, Box3, BoxGeometry, BufferGeometry, Color, CylinderGeometry, DirectionalLight, DoubleSide, Euler, Float32BufferAttribute, Group, Mesh, MeshDepthMaterial, MeshStandardMaterial, PerspectiveCamera, Quaternion, RGBADepthPacking, ShaderMaterial, Vector3 } from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { BOOST, CRUISE, flight, stepFlight, type FlightMode } from "./flight";
+import { BOOST, CRUISE, flight, isSitting, stepFlight, type FlightMode } from "./flight";
 import { wingBeatSound } from "./audio";
 import { stepErrands } from "./errands";
 import { updateSoundscape } from "./soundscape";
@@ -226,7 +226,7 @@ function Trail({ source, bend }: { source: React.RefObject<Group | null>; bend: 
     arr[5] = worldTip.z + sideways.z;
     attr.needsUpdate = true;
     const material = ref.current.material as ShaderMaterial;
-    material.uniforms.uStrength.value = flight.flying ? (0.34 + flight.boost * 0.5 + flight.wind * 0.4 + (flight.mode === "dive" ? 0.45 : 0)) * (1 - flight.hover) : 0;
+    material.uniforms.uStrength.value = flight.flying ? (0.34 + flight.boost * 0.5 + flight.wind * 0.4 + (flight.mode === "dive" ? 0.45 : 0)) * (1 - flight.hover) * flight.wings : 0;
   });
   return (
     <mesh ref={ref} geometry={geometry} frustumCulled={false} renderOrder={12}>
@@ -269,7 +269,18 @@ const WING_MODES: Record<FlightMode, WingShape> = {
   dive: { hz: 0.2, amp: 0.012, sweep: 1.05, droop: -0.26, spread: 0, span: 0.78, chord: 0.72, tint: "#4a5f78", tintAmount: 0.9, glow: 0 },
   hover: { hz: 0.62, amp: 0.25, sweep: -0.04, droop: -0.05, spread: 0.8, span: 1.2, chord: 1.16, tint: "#e8683f", tintAmount: 0, glow: 0 },
   rest: { hz: 0.12, amp: 0.012, sweep: 1.28, droop: 0.42, spread: 0, span: 0.62, chord: 0.8, tint: "#e8683f", tintAmount: 0, glow: 0 },
+  fall: { hz: 0.1, amp: 0, sweep: 1.4, droop: 0.1, spread: 0, span: 0.5, chord: 0.6, tint: "#4a5f78", tintAmount: 0.5, glow: 0 },
 };
+
+/** A slim wing pack on the back. The wings slide out of it to fly, and back in to land or drop. */
+function buildPack() {
+  const shell = new BoxGeometry(0.62, 0.2, 0.95).translate(0, 0.27, -0.18);
+  const ridge = new BoxGeometry(0.16, 0.12, 0.8).translate(0, 0.4, -0.2);
+  const strapA = new BoxGeometry(0.66, 0.06, 0.09).translate(0, 0.17, -0.5);
+  const strapB = new BoxGeometry(0.66, 0.06, 0.09).translate(0, 0.17, 0.1);
+  const vents = [-1, 1].map((side) => new CylinderGeometry(0.1, 0.1, 0.18, 12).rotateZ(Math.PI / 2).translate(side * 0.31, 0.3, -0.42));
+  return mergeGeometries([shell, ridge, strapA, strapB, ...vents].map((g) => g.toNonIndexed()))!;
+}
 const wingNow = { hz: 0.7, amp: 0.26, sweep: 0.1, droop: -0.03, spread: 0, span: 1, chord: 1, tintAmount: 0, glow: 0 };
 const wingTint = new Color("#e8683f");
 const tintTarget = new Color();
@@ -315,6 +326,7 @@ export function Hero({ lightRef }: { lightRef: React.RefObject<DirectionalLight 
   const sitting = useRef(0);
   const poses = useRef<{ bone: Bone; rest: Quaternion; bent: Quaternion }[]>([]);
   const wing = useMemo(() => buildWing(), []);
+  const pack = useMemo(() => buildPack(), []);
   const right = useMemo(() => makeWingMaterial(rightBend), []);
   const left = useMemo(() => makeWingMaterial(leftBend), []);
 
@@ -402,12 +414,18 @@ export function Hero({ lightRef }: { lightRef: React.RefObject<DirectionalLight 
     // On the way up, the outer wing folds in to slip through the air, except in a hover,
     // when the wings stay spread. Each downstroke makes a soft beat of air.
     const beat = Math.sin(stroke);
-    if (flight.flying && lastBeat.value >= 0 && beat < 0 && wingNow.amp > 0.2) wingBeatSound(wingNow.amp);
+    if (flight.flying && flight.wings > 0.8 && lastBeat.value >= 0 && beat < 0 && wingNow.amp > 0.2) wingBeatSound(wingNow.amp);
     lastBeat.value = beat;
     const fold = Math.max(0, Math.cos(stroke)) * Math.min(1, wingNow.amp * 2.4) * (1 - wingNow.spread);
     const bank = flight.turn * 0.1;
+    // Packed away, the wings shrink back along their length into the pack.
+    const out = flight.flying ? flight.wings : 1;
+    const outEased = out * out * (3 - 2 * out);
     rightWing.current.rotation.set(0, -wingNow.sweep, 0.12 + bank);
     leftWing.current.rotation.set(0, -wingNow.sweep, 0.12 - bank);
+    rightWing.current.scale.set(0.04 + outEased * 0.96, 0.5 + outEased * 0.5, 0.18 + outEased * 0.82);
+    leftWing.current.scale.copy(rightWing.current.scale);
+    rightWing.current.visible = leftWing.current.visible = out > 0.03;
     for (const bend of [rightBend, leftBend]) {
       bend.uPhase.value = stroke;
       bend.uAmp.value = wingNow.amp;
@@ -418,7 +436,7 @@ export function Hero({ lightRef }: { lightRef: React.RefObject<DirectionalLight 
     const resting = flight.mode === "rest";
     upright.current += ((resting ? Math.PI / 2 : hover * 1.32) - upright.current) * (1 - Math.exp(-3 * dt));
     // Knees bend and arms drop to sit down, and stretch out again for flight.
-    sitting.current += ((resting ? 1 : 0) - sitting.current) * (1 - Math.exp(-3.5 * dt));
+    sitting.current += ((isSitting() ? 1 : 0) - sitting.current) * (1 - Math.exp(-3.5 * dt));
     for (const pose of poses.current) pose.bone.quaternion.slerpQuaternions(pose.rest, pose.bent, sitting.current);
     body.current.rotation.x = upright.current;
     body.current.rotation.z = Math.sin(time * 26) * flight.shaken * flight.shaken * 0.32;
@@ -506,6 +524,9 @@ export function Hero({ lightRef }: { lightRef: React.RefObject<DirectionalLight 
               <primitive object={scene} />
             </group>
           </group>
+          <mesh geometry={pack} castShadow>
+            <meshStandardMaterial color="#5b6470" roughness={0.6} metalness={0.25} />
+          </mesh>
           <group ref={rightWing} position={[0.16, 0.3, -0.42]}>
             <mesh geometry={wing} material={right.material} customDepthMaterial={right.depth} castShadow frustumCulled={false} />
           </group>

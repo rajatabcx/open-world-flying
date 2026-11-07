@@ -2,8 +2,8 @@
 
 import { useFrame } from "@react-three/fiber";
 import { useMemo, useRef } from "react";
-import { AdditiveBlending, BufferGeometry, CylinderGeometry, DoubleSide, Float32BufferAttribute, Group, InstancedMesh, Mesh, Object3D, Points, Quaternion, Shape, ShapeGeometry, Vector3 } from "three";
-import { errands } from "./errands";
+import { AdditiveBlending, BufferGeometry, CylinderGeometry, DoubleSide, Float32BufferAttribute, Group, InstancedMesh, Mesh, Object3D, Points, Quaternion, RingGeometry, Shape, ShapeGeometry, Vector3 } from "three";
+import { errands, TALK_REACH } from "./errands";
 import { flight } from "./flight";
 import { parcelGeometry } from "./Villagers";
 import { glowTexture } from "./shared";
@@ -61,12 +61,41 @@ function Beacons() {
           varying float vDist;
           varying float vFace;
           void main() {
-            // Soft at its edges, fading as it rises, and gone by the time you arrive.
-            float a = pow(1.0 - vUp, 2.2) * smoothstep(50.0, 320.0, vDist) * vFace * vFace;
+            // Soft at its edges and fading as it rises. Up close it thins out but stays,
+            // so you can still find who you're looking for.
+            float a = pow(1.0 - vUp, 2.2) * mix(0.3, 1.0, smoothstep(30.0, 320.0, vDist)) * vFace * vFace;
             gl_FragColor = vec4(1.0, 0.72, 0.3, a * 0.5);
           }
         `}
       />
+    </instancedMesh>
+  );
+}
+
+/** A glowing circle on the ground around whoever you could talk to. Land inside it. */
+function TalkRings() {
+  const ref = useRef<InstancedMesh>(null!);
+  const geometry = useMemo(() => new RingGeometry(TALK_REACH - 5, TALK_REACH - 3.5, 64).rotateX(-Math.PI / 2), []);
+  useFrame((state) => {
+    const t = state.clock.elapsedTime;
+    let i = 0;
+    const put = (x: number, y: number, z: number) => {
+      const pulse = 1 + Math.sin(t * 2.2 + i) * 0.03;
+      dummy.position.set(x, y + 0.35, z);
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.set(pulse, 1, pulse);
+      dummy.updateMatrix();
+      ref.current.setMatrixAt(i++, dummy.matrix);
+    };
+    const parcel = errands.carrying;
+    if (parcel) put(parcel.to.x, parcel.to.y, parcel.to.z);
+    else for (const offer of errands.offers) put(offer.giver.x, offer.giver.y, offer.giver.z);
+    ref.current.count = i;
+    ref.current.instanceMatrix.needsUpdate = true;
+  });
+  return (
+    <instancedMesh ref={ref} args={[geometry, undefined, BEACONS]} frustumCulled={false} renderOrder={15}>
+      <meshBasicMaterial color="#ffc861" transparent opacity={0.55} depthWrite={false} blending={AdditiveBlending} toneMapped={false} />
     </instancedMesh>
   );
 }
@@ -108,6 +137,16 @@ function CarriedParcel() {
       pos.current.copy(flight.pos);
       return;
     }
+    rope.current.visible = !flight.resting;
+    if (flight.resting) {
+      // Standing, you hold it at your side.
+      hangAt.set(flight.pos.x + Math.cos(flight.yaw) * 0.95, flight.pos.y - 0.4, flight.pos.z - Math.sin(flight.yaw) * 0.95);
+      pos.current.copy(hangAt);
+      group.current.position.copy(pos.current);
+      group.current.scale.setScalar(0.6);
+      return;
+    }
+    group.current.scale.setScalar(1);
     // It trails below you on a short rope, swinging behind as you pick up speed.
     hangAt.copy(flight.pos).addScaledVector(flight.dir, -Math.min(2.4, Math.abs(flight.speed) * 0.03));
     hangAt.y -= 3.1;
@@ -274,6 +313,7 @@ export function Errands() {
   return (
     <>
       <Beacons />
+      <TalkRings />
       <WaitingParcels />
       <CarriedParcel />
       <GuideBird />

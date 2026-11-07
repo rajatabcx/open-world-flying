@@ -5,8 +5,10 @@ import { secretPlaces } from "./photo";
 import { caveAt, rng, VILLAGES } from "./terrain";
 import { VILLAGE_NAMES } from "./villages";
 
-// Deliveries are always optional. There's no timer or score, and nothing can go wrong:
-// fly by someone holding a glowing parcel to carry it, or just keep flying.
+// Deliveries are always optional. There's no timer or score, and nothing can go wrong.
+// Land by someone holding a glowing parcel and talk to them, and they'll tell you what it
+// is and who it's for. Say yes and it's yours to carry until you land by that person and
+// hand it over. You can stop and rest on the way, but you can't leave it somewhere.
 
 const ITEMS = [
   "a jar of honey",
@@ -30,15 +32,34 @@ const THANKS = [
   "They promise to save you a slice.",
 ];
 
-export type Offer = { giver: Person; to: Person; item: string };
+const ASKS = [
+  "Could you take {item} to {to} in {place}? I'd go myself, but my wings are in for mending.",
+  "Oh, a flier! Would you carry {item} to {to} over in {place}? They've been waiting all week.",
+  "If you're heading toward {place}, {to} is expecting {item}. Would you mind?",
+  "I promised {to} in {place} {item}. Would you fly it over for me?",
+];
+const GREETINGS = [
+  "For me? {item}! Thank you, flier.",
+  "{item}, at last. Come by any time, the door's always open.",
+  "You came all this way with {item}? Thank you. Mind the steps on your way up.",
+  "Oh, {item}! That's made my day.",
+];
 
-const REACH = 16;
-const REACH_UP = 26;
+export type Offer = { giver: Person; to: Person; item: string; ask: string };
+
+/** How close you need to land to talk with someone. */
+export const TALK_REACH = 22;
+/** How close you need to be before they point out you could land and talk. */
+const NOTICE_REACH = 160;
 const r = rng(31337);
+
+export type Talk = { person: Person; offer: Offer; kind: "ask" | "deliver"; line: string };
 
 export const errands = {
   offers: [] as Offer[],
   carrying: null as Offer | null,
+  /** The conversation on screen, if any. */
+  talk: null as Talk | null,
   delivered: 0,
   /** Homes that hung up a lantern after a delivery. */
   lantern: [] as { x: number; y: number; z: number }[],
@@ -66,59 +87,110 @@ function makeOffer(village: number): Offer {
   const elsewhere = (village + 1 + Math.floor(r() * (VILLAGES.length - 1))) % VILLAGES.length;
   const to = oneOf(free(PEOPLE.filter((p) => p.village === elsewhere)));
   giver.calling = true;
-  return { giver, to, item: oneOf(ITEMS) };
+  const item = oneOf(ITEMS);
+  return { giver, to, item, ask: fill(oneOf(ASKS), item, to) };
 }
+
+const fill = (line: string, item: string, to: Person) => {
+  const text = line.replace("{item}", item).replace("{to}", to.name).replace("{place}", VILLAGE_NAMES[to.village]);
+  return text.charAt(0).toUpperCase() + text.slice(1);
+};
 
 function setUp() {
   VILLAGES.forEach((_, village) => errands.offers.push(makeOffer(village)));
 }
 
-const near = (p: Person) => Math.hypot(flight.pos.x - p.x, flight.pos.z - p.z) < REACH && Math.abs(flight.pos.y - p.y) < REACH_UP;
+const distanceTo = (p: Person) => Math.hypot(flight.pos.x - p.x, flight.pos.z - p.z);
+const nearEnough = (p: Person) => distanceTo(p) < TALK_REACH && Math.abs(flight.pos.y - p.y) < 8;
 
 /** Where the errand you're on leads. */
 export function destination() {
   return errands.carrying?.to ?? null;
 }
 
-export function dropParcel() {
+/** Someone you've landed beside who has something to say, if there is anyone. */
+export function talkable(): Talk | null {
+  if (!flight.flying || !flight.resting || errands.talk) return null;
   const parcel = errands.carrying;
-  if (!parcel) return;
-  errands.carrying = null;
-  parcel.to.calling = false;
-  errands.offers.push(parcel);
-  say(`You left ${parcel.item} with ${parcel.giver.name}. No rush, it'll wait.`, flight.clock, 6);
+  if (parcel) {
+    return nearEnough(parcel.to) ? { person: parcel.to, offer: parcel, kind: "deliver", line: fill(oneOf(GREETINGS), parcel.item, parcel.to) } : null;
+  }
+  const offer = errands.offers.find((o) => nearEnough(o.giver));
+  return offer ? { person: offer.giver, offer, kind: "ask", line: offer.ask } : null;
+}
+
+/** Starts talking with whoever's beside you. */
+export function startTalk() {
+  const talk = talkable();
+  if (!talk) return false;
+  errands.talk = talk;
+  flight.busy = true;
+  // Turn to face them.
+  flight.yaw = Math.atan2(flight.pos.x - talk.person.x, flight.pos.z - talk.person.z);
+  return true;
+}
+
+function endTalk() {
+  errands.talk = null;
+  flight.busy = false;
+  // Stay standing a moment before sitting down again.
+  flight.restTime = 0.7;
+}
+
+/** Says yes to carrying the parcel, or finishes handing one over. */
+export function answerYes() {
+  const talk = errands.talk;
+  if (!talk) return;
+  const time = flight.clock;
+  if (talk.kind === "ask") {
+    const offer = talk.offer;
+    errands.offers.splice(errands.offers.indexOf(offer), 1);
+    errands.carrying = offer;
+    offer.giver.calling = false;
+    offer.to.calling = true;
+    say(`${offer.item} for ${offer.to.name} in ${VILLAGE_NAMES[offer.to.village]}. Follow the golden bird, then land beside them.`, time, 8);
+    pickupSound();
+  } else {
+    const parcel = talk.offer;
+    errands.carrying = null;
+    errands.delivered++;
+    parcel.to.calling = false;
+    errands.lantern.push({ x: parcel.to.homeX, y: parcel.to.y + 3.4, z: parcel.to.homeZ });
+    errands.burst = { x: parcel.to.x, y: parcel.to.y + 3, z: parcel.to.z };
+    errands.offers.push(makeOffer(parcel.giver.village));
+    say(oneOf(THANKS), time, 6);
+    deliveredSound();
+  }
+  endTalk();
+}
+
+/** Says no for now. The parcel waits right where it is. */
+export function answerNo() {
+  if (errands.talk?.kind === "deliver") return;
+  endTalk();
 }
 
 export function stepErrands(time: number) {
   if (errands.offers.length === 0 && !errands.carrying) setUp();
   if (!flight.flying) return;
   noticeSecrets(time);
+}
 
+/** A nudge when you're close to someone you could talk to. */
+function nudge() {
+  if (errands.talk) return "";
   const parcel = errands.carrying;
-  if (parcel) {
-    if (near(parcel.to)) {
-      errands.carrying = null;
-      errands.delivered++;
-      parcel.to.calling = false;
-      parcel.giver.calling = false;
-      errands.lantern.push({ x: parcel.to.homeX, y: parcel.to.y + 3.4, z: parcel.to.homeZ });
-      errands.burst = { x: parcel.to.x, y: parcel.to.y + 3, z: parcel.to.z };
-      errands.offers.push(makeOffer(parcel.giver.village));
-      say(`${parcel.to.name} has ${parcel.item}. ${oneOf(THANKS)}`, time, 7);
-      deliveredSound();
+  const people = parcel ? [parcel.to] : errands.offers.map((o) => o.giver);
+  for (const person of people) {
+    const d = distanceTo(person);
+    if (d > NOTICE_REACH) continue;
+    if (flight.resting) {
+      if (nearEnough(person)) return `F  Talk to ${person.name}`;
+      continue;
     }
-    return;
+    return parcel ? `${person.name} is waiting below. Land close by (E) to hand it over.` : `${person.name} is waving with a parcel. Land close by (E) to talk.`;
   }
-  const taken = errands.offers.findIndex((o) => near(o.giver));
-  // Don't snatch a parcel straight back up right after setting it down.
-  if (taken >= 0 && time > errands.captionUntil - 3) {
-    const offer = errands.offers[taken];
-    errands.offers.splice(taken, 1);
-    errands.carrying = offer;
-    offer.to.calling = true;
-    say(`${offer.giver.name} hands you ${offer.item} for ${offer.to.name} in ${VILLAGE_NAMES[offer.to.village]}. Follow the golden bird. X sets it down.`, time, 9);
-    pickupSound();
-  }
+  return "";
 }
 
 const found = new Set<string>();
@@ -138,6 +210,8 @@ function noticeSecrets(time: number) {
 }
 
 export function captionNow(time: number) {
+  const hint = nudge();
+  if (hint) return hint;
   if (time < errands.captionUntil) return errands.caption;
   return errands.carrying ? `${errands.carrying.item} for ${errands.carrying.to.name} in ${VILLAGE_NAMES[errands.carrying.to.village]}` : "";
 }

@@ -18,15 +18,17 @@ export function updateSoundscape(dt: number) {
     setScene({ ...SILENT, night: sky.night });
     return;
   }
-  const speed = Math.abs(flight.speed) + flight.impulse.length() * 0.5;
+  const speed = Math.hypot(flight.speed, flight.folded ? flight.vy : 0) + flight.impulse.length() * 0.5;
   const pace = Math.min(1, speed / 150);
-  scene.wind = 0.015 + pace * pace * 0.34 + flight.wind * 0.06;
-  scene.windTone = 260 + pace * 1250;
-  scene.rush = flight.mode === "dive" || flight.mode === "boost" ? Math.max(0, pace - 0.25) * 0.24 : 0;
+  // The air only ever swells and deepens. Its tone stays low, even at full speed.
+  scene.wind = 0.03 + pace * pace * 0.32 + flight.wind * 0.05;
+  scene.windTone = 220 + pace * 520;
+  const fast = flight.mode === "dive" || flight.mode === "boost" || flight.mode === "fall";
+  scene.rush = fast ? Math.max(0, pace - 0.3) * 0.32 : 0;
 
   const ground = Math.max(heightAt(flight.pos.x, flight.pos.z), 0);
   const low = flight.pos.y - ground < 13;
-  scene.spray = flight.skimming > 0 && low ? Math.min(0.13, speed * 0.0024) * flight.skimming : 0;
+  scene.spray = flight.skimming > 0 && low ? Math.min(0.06, speed * 0.0011) * flight.skimming : 0;
   scene.high = smooth(120, 420, flight.pos.y - ground);
   let village = Infinity;
   for (const v of VILLAGES) village = Math.min(village, Math.hypot(flight.pos.x - v.x, flight.pos.z - v.z) - v.r);

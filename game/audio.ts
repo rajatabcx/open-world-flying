@@ -32,7 +32,8 @@ const CHORDS = [
   [45, 57, 62, 64, 69, 76], // Asus4
 ];
 const CHORD_SECONDS = 14;
-const SCALE = [74, 76, 78, 81, 83, 86, 88, 90];
+// Kept low and round, so nothing up top rings in the ear.
+const SCALE = [62, 64, 66, 69, 71, 74, 76, 78];
 
 function impulse(ctx: BaseAudioContext, seconds: number, decay: number) {
   const length = Math.floor(ctx.sampleRate * seconds);
@@ -53,12 +54,33 @@ function noiseBuffer(ctx: BaseAudioContext, seconds: number) {
   return buffer;
 }
 
+/** Deep, soft noise like distant surf, with none of white noise's hiss. */
+function brownBuffer(ctx: BaseAudioContext, seconds: number) {
+  const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * seconds), ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  let last = 0;
+  for (let i = 0; i < data.length; i++) {
+    last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02;
+    data[i] = last * 3.5;
+  }
+  // Fade the ends together so the loop has no click.
+  const fade = Math.floor(ctx.sampleRate * 0.05);
+  for (let i = 0; i < fade; i++) {
+    const k = i / fade;
+    data[i] *= k;
+    data[data.length - 1 - i] *= k;
+  }
+  return buffer;
+}
+
 /** Builds the mix: music and effects go through soft compression, with a shared room. */
 function buildOutput(ctx: BaseAudioContext, destination: AudioNode): Output & { master: GainNode; mix: Mix } {
   const master = ctx.createGain();
   const limiter = ctx.createDynamicsCompressor();
-  limiter.threshold.value = -14;
-  limiter.ratio.value = 6;
+  limiter.threshold.value = -18;
+  limiter.ratio.value = 4;
+  limiter.attack.value = 0.02;
+  limiter.release.value = 0.4;
   master.connect(limiter);
   limiter.connect(destination);
 
@@ -73,7 +95,7 @@ function buildOutput(ctx: BaseAudioContext, destination: AudioNode): Output & { 
   music.gain.value = 0.8;
   const musicTone = ctx.createBiquadFilter();
   musicTone.type = "lowpass";
-  musicTone.frequency.value = 18000;
+  musicTone.frequency.value = 3200;
   music.connect(musicTone);
   musicTone.connect(master);
   musicTone.connect(reverb);
@@ -120,9 +142,9 @@ function padNote(out: Output, freq: number, start: number, length: number, level
   const filter = ctx.createBiquadFilter();
   filter.type = "lowpass";
   filter.Q.value = 0.3;
-  filter.frequency.setValueAtTime(420, start);
-  filter.frequency.linearRampToValueAtTime(1050, start + length * 0.55);
-  filter.frequency.linearRampToValueAtTime(420, start + length);
+  filter.frequency.setValueAtTime(360, start);
+  filter.frequency.linearRampToValueAtTime(780, start + length * 0.55);
+  filter.frequency.linearRampToValueAtTime(360, start + length);
   gain.gain.setValueAtTime(0, start);
   gain.gain.linearRampToValueAtTime(level, start + length * 0.4);
   gain.gain.setValueAtTime(level, start + length * 0.6);
@@ -150,14 +172,19 @@ function padNote(out: Output, freq: number, start: number, length: number, level
 function pluck(out: Output, freq: number, start: number, level: number, bus: AudioNode = out.plucks) {
   const { ctx } = out;
   const gain = ctx.createGain();
+  // A felt-hammer touch: a soft attack and a long, warm fade.
   gain.gain.setValueAtTime(0, start);
-  gain.gain.linearRampToValueAtTime(level, start + 0.012);
+  gain.gain.linearRampToValueAtTime(level, start + 0.045);
   gain.gain.exponentialRampToValueAtTime(0.0001, start + 3.2);
-  gain.connect(bus);
+  const soften = ctx.createBiquadFilter();
+  soften.type = "lowpass";
+  soften.frequency.value = 1400;
+  soften.Q.value = 0.2;
+  gain.connect(soften);
+  soften.connect(bus);
   for (const [ratio, amount] of [
     [1, 1],
-    [2, 0.22],
-    [3.01, 0.06],
+    [2, 0.12],
   ]) {
     const osc = ctx.createOscillator();
     const part = ctx.createGain();
@@ -181,7 +208,7 @@ function scheduleBar(out: Output, bar: number, start: number) {
   while (t < start + CHORD_SECONDS) {
     // Step to a nearby note, so the line wanders instead of jumping.
     last = Math.max(0, Math.min(SCALE.length - 1, last + Math.round((Math.random() - 0.5) * 4)));
-    pluck(out, midi(SCALE[last]), t, 0.05 + Math.random() * 0.035);
+    pluck(out, midi(SCALE[last]), t, 0.045 + Math.random() * 0.025);
     t += 2.2 + Math.random() * 3.6;
   }
   // Near the villages, a warm plucked pattern like someone playing on a doorstep.
@@ -193,8 +220,8 @@ function scheduleBar(out: Output, bar: number, start: number) {
     pluck(out, midi(note + (note < 50 ? 12 : 0)), start + i * beat + Math.random() * 0.03, 0.05 + Math.random() * 0.018, out.warm);
   }
   // High up, thin glassy tones hang over everything.
-  for (const note of [chord[3] + 24, chord[5] + 12]) {
-    padNote(out, midi(note), start + 2 + Math.random() * 4, CHORD_SECONDS - 2, 0.016, out.high);
+  for (const note of [chord[3] + 12, chord[5]]) {
+    padNote(out, midi(note), start + 2 + Math.random() * 4, CHORD_SECONDS - 2, 0.012, out.high);
   }
 }
 
@@ -216,7 +243,7 @@ function playBounce(out: Output, at: number) {
   // A soft bell on top makes it sound cheerful.
   const bell = ctx.createOscillator();
   const bellGain = ctx.createGain();
-  bell.frequency.value = midi(SCALE[Math.floor(Math.random() * 4) + 2]);
+  bell.frequency.value = midi(SCALE[Math.floor(Math.random() * 4) + 2] + 12);
   bellGain.gain.setValueAtTime(0.09, at + 0.03);
   bellGain.gain.exponentialRampToValueAtTime(0.001, at + 0.9);
   bell.connect(bellGain);
@@ -303,10 +330,10 @@ const DELIVERED = [74, 78, 81, 86];
 function playBeat(out: Output, at: number, strength: number) {
   const { ctx } = out;
   const source = ctx.createBufferSource();
-  source.buffer = noiseBuffer(ctx, 0.35);
+  source.buffer = brownBuffer(ctx, 0.35);
   const filter = ctx.createBiquadFilter();
   filter.type = "lowpass";
-  filter.Q.value = 0.8;
+  filter.Q.value = 0.4;
   filter.frequency.setValueAtTime(190, at);
   filter.frequency.linearRampToValueAtTime(520, at + 0.07);
   filter.frequency.exponentialRampToValueAtTime(130, at + 0.3);
@@ -318,6 +345,53 @@ function playBeat(out: Output, at: number, strength: number) {
   filter.connect(gain);
   gain.connect(out.sfx);
   source.start(at);
+}
+
+/** Feet or shoulder meeting the ground: a soft, low bump with no crack to it. */
+function playThud(out: Output, at: number, strength: number) {
+  const { ctx } = out;
+  const level = 0.25 + strength * 0.45;
+  const thud = ctx.createOscillator();
+  const gain = ctx.createGain();
+  thud.frequency.setValueAtTime(95, at);
+  thud.frequency.exponentialRampToValueAtTime(42, at + 0.25);
+  gain.gain.setValueAtTime(0, at);
+  gain.gain.linearRampToValueAtTime(level, at + 0.012);
+  gain.gain.exponentialRampToValueAtTime(0.001, at + 0.4);
+  thud.connect(gain);
+  gain.connect(out.sfx);
+  thud.start(at);
+  thud.stop(at + 0.45);
+  const dust = ctx.createBufferSource();
+  dust.buffer = brownBuffer(ctx, 0.6);
+  const filter = ctx.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.frequency.value = 500;
+  const dustGain = ctx.createGain();
+  dustGain.gain.setValueAtTime(level * 0.9, at);
+  dustGain.gain.exponentialRampToValueAtTime(0.001, at + 0.5);
+  dust.connect(filter);
+  filter.connect(dustGain);
+  dustGain.connect(out.sfx);
+  dust.start(at);
+}
+
+/** Two low, soft notes, a nudge to pull up rather than an alarm. */
+function playWarn(out: Output, at: number) {
+  const { ctx } = out;
+  [69, 64].forEach((note, i) => {
+    const start = at + i * 0.18;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.frequency.value = midi(note);
+    gain.gain.setValueAtTime(0, start);
+    gain.gain.linearRampToValueAtTime(0.09, start + 0.04);
+    gain.gain.exponentialRampToValueAtTime(0.001, start + 0.7);
+    osc.connect(gain);
+    gain.connect(out.sfx);
+    osc.start(start);
+    osc.stop(start + 0.75);
+  });
 }
 
 export type Scene = {
@@ -337,10 +411,10 @@ export type Scene = {
 
 type Beds = { wind: GainNode; windFilter: BiquadFilterNode; rush: GainNode; spray: GainNode; falls: GainNode; rain: GainNode };
 
-function loopInto(out: Output, type: BiquadFilterType, frequency: number, q: number) {
+function loopInto(out: Output, type: BiquadFilterType, frequency: number, q: number, soft = false) {
   const { ctx } = out;
   const source = ctx.createBufferSource();
-  source.buffer = noiseBuffer(ctx, 5);
+  source.buffer = soft ? brownBuffer(ctx, 6) : noiseBuffer(ctx, 5);
   source.loop = true;
   const filter = ctx.createBiquadFilter();
   filter.type = type;
@@ -357,12 +431,14 @@ function loopInto(out: Output, type: BiquadFilterType, frequency: number, q: num
 
 /** The sounds that never stop, only swell: the air, the water and the rain. */
 function buildBeds(out: Output): Beds {
-  const wind = loopInto(out, "bandpass", 400, 0.5);
+  // The air is all deep, soft noise through gentle low-pass filters, so even a full-speed
+  // dive sounds like a long exhale rather than a hiss.
+  const wind = loopInto(out, "lowpass", 400, 0.3, true);
   return {
     wind: wind.gain,
     windFilter: wind.filter,
-    rush: loopInto(out, "highpass", 2200, 0.4).gain,
-    spray: loopInto(out, "highpass", 3400, 0.5).gain,
+    rush: loopInto(out, "lowpass", 650, 0.2, true).gain,
+    spray: loopInto(out, "bandpass", 1500, 0.3).gain,
     falls: loopInto(out, "lowpass", 1100, 0.3).gain,
     rain: loopInto(out, "bandpass", 5200, 0.4).gain,
   };
@@ -371,9 +447,10 @@ function buildBeds(out: Output): Beds {
 function applyScene(ctx: BaseAudioContext, beds: Beds, mix: Mix, s: Scene) {
   const now = ctx.currentTime;
   const set = (param: AudioParam, value: number, ease = 0.25) => param.setTargetAtTime(value, now, ease);
-  set(beds.wind.gain, s.wind);
-  set(beds.windFilter.frequency, s.windTone);
-  set(beds.rush.gain, s.rush);
+  // Slow easing, so speeding up swells the air instead of switching it on.
+  set(beds.wind.gain, s.wind, 0.6);
+  set(beds.windFilter.frequency, s.windTone, 0.8);
+  set(beds.rush.gain, s.rush, 0.9);
   set(beds.spray.gain, s.spray, 0.12);
   set(beds.falls.gain, s.falls);
   set(beds.rain.gain, s.rain, 0.8);
@@ -385,7 +462,7 @@ function applyScene(ctx: BaseAudioContext, beds: Beds, mix: Mix, s: Scene) {
   set(mix.highLevel.gain, s.high, 1.6);
   set(mix.wet.gain, 0.5 + s.high * 0.25 + s.cave * 0.3, 1.6);
   set(mix.sfxRoom.gain, 0.18 + s.cave * 0.55, 0.5);
-  set(mix.musicTone.frequency, s.cave > 0.5 ? 950 : 18000, 0.8);
+  set(mix.musicTone.frequency, s.cave > 0.5 ? 950 : 3200, 0.8);
   set(mix.musicLevel.gain, 0.8 * (1 - s.night * 0.22), 2);
 }
 
@@ -450,6 +527,14 @@ export function bounceSound() {
 
 export function crashSound(strength: number) {
   if (context && output) playCrash(output, context.currentTime, strength);
+}
+
+export function thudSound(strength: number) {
+  if (context && output) playThud(output, context.currentTime, strength);
+}
+
+export function warnSound() {
+  if (context && output) playWarn(output, context.currentTime);
 }
 
 export function wingBeatSound(strength: number) {

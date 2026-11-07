@@ -23,7 +23,8 @@ Flying works like a bird's, but you can never fall out of the sky.
 - **Dive** (up arrow) with wings tucked. It's the fastest way to fly, trading height for speed.
 - **Boost** (Shift) flies level and straight at high speed.
 - **Hover** (S to brake): you stand upright on the air, wings wide open, holding height with slow, heavy beats. Holds until you flap or boost. Keep holding S to drift backward.
-- **Trees** are solid. Bumping one costs most of your speed, but it's never a failure.
+- **Pack the wings away** (Q) to drop like a stone, head first. Any flying key throws them open again and turns the fall into a swoop. Fall all the way down and you land on your feet.
+- **Trees, the ground and cave walls** are solid. Hitting one costs most of your speed and bounces you back a little, but it's never a failure. When the ground is coming up fast, a soft "Pull up" warning sounds first.
 
 ## In the world
 
@@ -52,12 +53,13 @@ Everything here is optional. There are no timers, scores or ways to fail.
 | E | Land on the ground or a rooftop |
 | W, Shift or ↓ | Take off again |
 | P | Photo mode. Arrows move the camera, W and S zoom, Enter takes the photo |
-| X | Set a parcel down |
+| Q | Pack the wings away and drop, or open them again |
+| F | Talk to someone you've landed beside |
 | T | Move the day along |
 
 ### Deliveries
 
-A golden glow marks someone holding a parcel. Fly close to carry it, follow the golden bird to the person waiting in another village, and fly close to hand it over. A lantern then goes up by their door.
+A golden glow marks someone holding a parcel, with a golden circle on the ground around them. Land inside the circle and talk to them (F). They tell you what it is and who it's for, and you can say yes or not today. Once you've taken it, it stays with you: you can stop and rest anywhere, but you can't leave it somewhere. Follow the golden bird, land in the circle by the person waiting, and hand it over. A lantern then goes up by their door.
 
 ### Wings
 
@@ -70,14 +72,15 @@ The wings change shape and colour with how you're flying.
 | Diving | Falcon | Narrow and swept back, with slate tips |
 | Boosting | Swift | Slim with glowing gold tips |
 | Hovering | None, a winged figure standing on the air | Fully spread and broad, with slow, heavy beats |
-| Resting | | Folded behind you like a cloak |
+| Falling | | Packed away |
+| Resting | | Packed away into the wing pack on your back |
 
 ### World
 
 - **Land:** rolling hills, dunes, stepped rock, flat-topped mesas, farmed terraces, and fields of lavender, wheat and poppies.
 - **Trees:** cypress, olive, stone pine, palm, almond blossom, lemon and oak. Each grows in its own groves, and trees near you use a detailed model.
 - **The river:** it starts at the Hidden Falls and winds down the canyon to the sea, with a wind current following it.
-- **Caves:** Behind the Falls, The Hollow Hill and The Long Dark. They hold glowing crystals and fireflies, and the walls gently keep you in the tunnel.
+- **Caves:** Behind the Falls, The Hollow Hill and The Long Dark. They're wide enough to glide through and hold glowing crystals and fireflies. The walls and roof are solid rock.
 - **The Drowned Temple:** a ruin in clear shallow water.
 - **Wind:** updrafts and balloons are placed automatically so they stay clear of the wind tunnels.
 

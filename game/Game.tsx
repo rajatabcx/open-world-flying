@@ -8,9 +8,9 @@ import { sky, hurryDay } from "./time";
 import { VillageLife } from "./VillageLife";
 import { weather, startShower } from "./weather";
 import { audioState, renderForTest, setMuted, startAudio, stopAudio } from "./audio";
-import { captionNow, dropParcel, errands } from "./errands";
+import { answerNo, answerYes, captionNow, errands, startTalk, talkable, type Talk } from "./errands";
 import { Errands } from "./ErrandScene";
-import { canLand, flight, land, startAt } from "./flight";
+import { canLand, flight, land, startAt, toggleWings } from "./flight";
 import { enterPhoto, leavePhoto, loadPostcards, makePostcard, placeName, savePostcards, type Postcard } from "./photo";
 import { Ruin } from "./Ruin";
 import { SeaSkim } from "./SeaSkim";
@@ -26,6 +26,7 @@ import { Arches, Villages } from "./Scenery";
 import { RiverAndFalls } from "./Waters";
 import { Balloons, Birds, Clouds, Leaves, Streaks, Wind } from "./Sky";
 import { CAVES, FALLS, heightAt, PLACES, RIVER, VILLAGES, type PlaceId } from "./terrain";
+import { VILLAGE_NAMES } from "./villages";
 import { TREES } from "./trees";
 import { BALLOONS, FOG_FAR, FOG_NEAR, HORIZON, SUN, WIND } from "./world";
 
@@ -122,8 +123,11 @@ export default function Game() {
   const [hint, setHint] = useState(false);
   const [muted, setMutedState] = useState(false);
   const [caption, setCaption] = useState("");
-  const [carrying, setCarrying] = useState(false);
   const [landable, setLandable] = useState(false);
+  const [canTalk, setCanTalk] = useState(false);
+  const [talk, setTalk] = useState<Talk | null>(null);
+  const [warning, setWarning] = useState(false);
+  const [folded, setFolded] = useState(false);
   const [photoMode, setPhotoMode] = useState(false);
   const [album, setAlbum] = useState<Postcard[] | null>(null);
   const [flash, setFlash] = useState(false);
@@ -142,15 +146,25 @@ export default function Game() {
     if (!flying) return;
     const id = setInterval(() => {
       setCaption(captionNow(flight.clock));
-      setCarrying(!!errands.carrying);
       setLandable(canLand());
-    }, 200);
+      setCanTalk(!!talkable());
+      setTalk(errands.talk);
+      setWarning(flight.warning > 0.35);
+      setFolded(flight.folded);
+    }, 120);
     return () => clearInterval(id);
   }, [flying]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.code === "KeyX") dropParcel();
+      if (errands.talk) {
+        if (e.code === "Enter" || e.code === "KeyF" || e.code === "KeyY") answerYes();
+        if (e.code === "Escape" || e.code === "KeyN") answerNo();
+        setTalk(errands.talk);
+        return;
+      }
+      if (e.code === "KeyF" && startTalk()) setTalk(errands.talk);
+      if (e.code === "KeyQ") toggleWings();
       if (e.code === "KeyH" && flight.flying) toggleControls();
       if (e.code === "KeyT") hurryDay();
       if (e.code === "KeyE") land();
@@ -299,11 +313,50 @@ export default function Game() {
             <p><b className="font-semibold">↓</b> flap up · <b className="font-semibold">↑</b> dive · <b className="font-semibold">← →</b> turn</p>
             <p><b className="font-semibold">W</b> flap forward · let go to glide · <b className="font-semibold">S</b> brake to a hover</p>
             <p><b className="font-semibold">Shift</b> boost · or drag the mouse to steer</p>
-            <p><b className="font-semibold">E</b> land, then <b className="font-semibold">W</b> to fly again · <b className="font-semibold">P</b> photo · <b className="font-semibold">T</b> move the day along · <b className="font-semibold">X</b> set a parcel down</p>
-            <p><b className="font-semibold">M</b> sound · <b className="font-semibold">H</b> show or hide this</p>
-            <p className="mt-1 text-white/80">See a golden glow? Someone has a parcel, if you feel like carrying it.</p>
+            <p><b className="font-semibold">Q</b> pack the wings away and drop · any flying key throws them open again</p>
+            <p><b className="font-semibold">E</b> land, then <b className="font-semibold">W</b> to fly again · <b className="font-semibold">F</b> talk to someone beside you</p>
+            <p><b className="font-semibold">P</b> photo · <b className="font-semibold">T</b> move the day along · <b className="font-semibold">M</b> sound · <b className="font-semibold">H</b> show or hide this</p>
+            <p className="mt-1 text-white/80">See a golden glow? Someone has a parcel. Land in their circle and talk to them, if you feel like carrying it.</p>
           </div>
-          {caption && (
+          {warning && !talk && (
+            <div role="status" className="pointer-events-none absolute inset-x-0 top-1/3 flex justify-center">
+              <div className="animate-pulse rounded-full bg-amber-400/80 px-5 py-2 text-sm font-semibold tracking-wide text-slate-900 shadow-lg backdrop-blur">
+                Pull up ↓
+              </div>
+            </div>
+          )}
+          {talk && (
+            <div className="absolute inset-x-4 bottom-8 mx-auto max-w-md rounded-2xl bg-black/50 px-5 py-4 text-white shadow-xl backdrop-blur pointer-coarse:bottom-40">
+              <p className="text-xs uppercase tracking-widest text-amber-200/90">
+                {talk.person.name} · {VILLAGE_NAMES[talk.person.village]}
+              </p>
+              <p className="mt-1.5 text-base leading-6">&ldquo;{talk.line}&rdquo;</p>
+              <div className="mt-3 flex gap-2">
+                <button
+                  onClick={() => {
+                    answerYes();
+                    setTalk(errands.talk);
+                  }}
+                  className="rounded-full bg-white px-5 py-2 text-sm font-medium text-slate-900"
+                >
+                  {talk.kind === "ask" ? "I'll take it (Enter)" : "Hand it over (Enter)"}
+                </button>
+                {talk.kind === "ask" && (
+                  <button
+                    onClick={() => {
+                      answerNo();
+                      setTalk(errands.talk);
+                    }}
+                    className="rounded-full bg-white/15 px-5 py-2 text-sm"
+                  >
+                    Not today (Esc)
+                  </button>
+                )}
+              </div>
+              {talk.kind === "ask" && <p className="mt-2.5 text-xs text-white/70">Once you take it, it stays with you until it&apos;s delivered.</p>}
+            </div>
+          )}
+          {caption && !talk && (
             <div className="pointer-events-none absolute inset-x-4 bottom-8 mx-auto w-fit max-w-lg rounded-2xl bg-black/35 px-5 py-2 text-center text-sm leading-6 text-white backdrop-blur pointer-coarse:bottom-40">
               {caption}
             </div>
@@ -349,11 +402,14 @@ export default function Game() {
                 Land
               </button>
             )}
-            {carrying && (
-              <button onClick={dropParcel} className="h-16 w-16 rounded-full bg-white/30 text-xs font-medium text-white backdrop-blur active:bg-white/50">
-                Set down
+            {canTalk && (
+              <button onClick={() => startTalk() && setTalk(errands.talk)} className="h-16 w-16 rounded-full bg-white/30 text-xs font-medium text-white backdrop-blur active:bg-white/50">
+                Talk
               </button>
             )}
+            <button onClick={toggleWings} className="h-16 w-16 rounded-full bg-white/30 text-xs font-medium text-white backdrop-blur active:bg-white/50">
+              {folded ? "Open" : "Drop"}
+            </button>
             {[
               ["KeyS", "Brake"],
               ["KeyW", "Flap"],
