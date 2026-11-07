@@ -24,15 +24,18 @@ type Mix = {
 
 const midi = (n: number) => 440 * Math.pow(2, (n - 69) / 12);
 
-// A slow, unresolved loop in D major that never feels like it's heading anywhere.
+// The music is a slow, sparse piece for soft keys: a gentle rolled chord every so often,
+// a few unhurried notes from the pentatonic scale, and a lot of quiet in between. Every
+// tone is a pure sine with at most a whisper of overtone, nothing is detuned, and no filter
+// sweeps, so there's no throbbing or swelling to wear on the ear.
 const CHORDS = [
-  [50, 57, 62, 66, 69, 76], // Dmaj add9
-  [43, 55, 62, 67, 71, 74], // Gmaj
-  [47, 54, 62, 66, 69, 74], // Bm7
-  [45, 57, 62, 64, 69, 76], // Asus4
+  [50, 57, 61, 64, 66], // D major 9, open voicing
+  [47, 54, 57, 62, 66], // B minor 7
+  [43, 50, 54, 59, 62], // G major 7
+  [45, 52, 57, 61, 64], // A, open fifth with the third on top
 ];
-const CHORD_SECONDS = 14;
-// Kept low and round, so nothing up top rings in the ear.
+const CHORD_SECONDS = 16;
+// D major pentatonic, which has no clashing notes, kept in the warm middle register.
 const SCALE = [62, 64, 66, 69, 71, 74, 76, 78];
 
 function impulse(ctx: BaseAudioContext, seconds: number, decay: number) {
@@ -85,14 +88,14 @@ function buildOutput(ctx: BaseAudioContext, destination: AudioNode): Output & { 
   limiter.connect(destination);
 
   const reverb = ctx.createConvolver();
-  reverb.buffer = impulse(ctx, 4.5, 2.6);
+  reverb.buffer = impulse(ctx, 3, 3.2);
   const wet = ctx.createGain();
-  wet.gain.value = 0.55;
+  wet.gain.value = 0.3;
   reverb.connect(wet);
   wet.connect(master);
 
   const music = ctx.createGain();
-  music.gain.value = 0.8;
+  music.gain.value = 0.6;
   const musicTone = ctx.createBiquadFilter();
   musicTone.type = "lowpass";
   musicTone.frequency.value = 3200;
@@ -136,93 +139,75 @@ function buildOutput(ctx: BaseAudioContext, destination: AudioNode): Output & { 
   };
 }
 
+/** A soft held tone that fades in and out slowly. Pure sine, so it never beats or throbs. */
 function padNote(out: Output, freq: number, start: number, length: number, level: number, bus: AudioNode = out.pads) {
   const { ctx } = out;
   const gain = ctx.createGain();
-  const filter = ctx.createBiquadFilter();
-  filter.type = "lowpass";
-  filter.Q.value = 0.3;
-  filter.frequency.setValueAtTime(360, start);
-  filter.frequency.linearRampToValueAtTime(780, start + length * 0.55);
-  filter.frequency.linearRampToValueAtTime(360, start + length);
   gain.gain.setValueAtTime(0, start);
-  gain.gain.linearRampToValueAtTime(level, start + length * 0.4);
-  gain.gain.setValueAtTime(level, start + length * 0.6);
+  gain.gain.linearRampToValueAtTime(level, start + Math.min(5, length * 0.35));
+  gain.gain.setValueAtTime(level, start + length * 0.65);
   gain.gain.linearRampToValueAtTime(0, start + length);
-  filter.connect(gain);
   gain.connect(bus);
-  for (const [type, detune, amount] of [
-    ["triangle", -6, 0.6],
-    ["triangle", 6, 0.6],
-    ["sine", 0, 0.8],
-  ] as const) {
-    const osc = ctx.createOscillator();
-    const part = ctx.createGain();
-    part.gain.value = amount;
-    osc.type = type;
-    osc.frequency.value = freq;
-    osc.detune.value = detune;
-    osc.connect(part);
-    part.connect(filter);
+  const osc = ctx.createOscillator();
+  osc.frequency.value = freq;
+  osc.connect(gain);
+  osc.start(start);
+  osc.stop(start + length + 0.05);
+}
+
+/** A soft electric-piano note: a gentle touch, a warm body and a long, quiet fade. */
+function key(out: Output, freq: number, start: number, level: number, bus: AudioNode = out.plucks, length = 4.5) {
+  const { ctx } = out;
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0, start);
+  gain.gain.linearRampToValueAtTime(level, start + 0.06);
+  gain.gain.exponentialRampToValueAtTime(level * 0.35, start + 1.2);
+  gain.gain.exponentialRampToValueAtTime(0.0001, start + length);
+  const soften = ctx.createBiquadFilter();
+  soften.type = "lowpass";
+  soften.frequency.value = 1100;
+  soften.Q.value = 0.1;
+  gain.connect(soften);
+  soften.connect(bus);
+  const body = ctx.createOscillator();
+  body.frequency.value = freq;
+  body.connect(gain);
+  // A faint octave that fades faster than the note, which gives the key its soft "tine".
+  const tine = ctx.createOscillator();
+  const tineGain = ctx.createGain();
+  tine.frequency.value = freq * 2;
+  tineGain.gain.setValueAtTime(0.1, start);
+  tineGain.gain.exponentialRampToValueAtTime(0.001, start + 0.9);
+  tine.connect(tineGain);
+  tineGain.connect(gain);
+  for (const osc of [body, tine]) {
     osc.start(start);
     osc.stop(start + length + 0.05);
   }
 }
 
-function pluck(out: Output, freq: number, start: number, level: number, bus: AudioNode = out.plucks) {
-  const { ctx } = out;
-  const gain = ctx.createGain();
-  // A felt-hammer touch: a soft attack and a long, warm fade.
-  gain.gain.setValueAtTime(0, start);
-  gain.gain.linearRampToValueAtTime(level, start + 0.045);
-  gain.gain.exponentialRampToValueAtTime(0.0001, start + 3.2);
-  const soften = ctx.createBiquadFilter();
-  soften.type = "lowpass";
-  soften.frequency.value = 1400;
-  soften.Q.value = 0.2;
-  gain.connect(soften);
-  soften.connect(bus);
-  for (const [ratio, amount] of [
-    [1, 1],
-    [2, 0.12],
-  ]) {
-    const osc = ctx.createOscillator();
-    const part = ctx.createGain();
-    part.gain.value = amount;
-    osc.frequency.value = freq * ratio;
-    osc.connect(part);
-    part.connect(gain);
-    osc.start(start);
-    osc.stop(start + 3.3);
-  }
-}
-
-/** Schedules one chord's worth of music: the pad, and a few unhurried notes on top. */
+/** Schedules one chord's worth of music, with plenty of space left in it. */
 function scheduleBar(out: Output, bar: number, start: number) {
   const chord = CHORDS[bar % CHORDS.length];
-  chord.forEach((note, i) => {
-    padNote(out, midi(note), start, CHORD_SECONDS + 5, i === 0 ? 0.075 : 0.042);
-  });
-  let t = start + 1.5 + Math.random() * 3;
-  let last = Math.floor(Math.random() * SCALE.length);
-  while (t < start + CHORD_SECONDS) {
-    // Step to a nearby note, so the line wanders instead of jumping.
-    last = Math.max(0, Math.min(SCALE.length - 1, last + Math.round((Math.random() - 0.5) * 4)));
-    pluck(out, midi(SCALE[last]), t, 0.045 + Math.random() * 0.025);
-    t += 2.2 + Math.random() * 3.6;
+  // A low, quiet bed of just the root and fifth underneath.
+  padNote(out, midi(chord[0]), start, CHORD_SECONDS + 3, 0.03);
+  padNote(out, midi(chord[1]), start + 0.5, CHORD_SECONDS + 2, 0.02);
+  // The chord, rolled slowly from the bottom up, once at the start of the bar.
+  chord.slice(1).forEach((note, i) => key(out, midi(note), start + 0.3 + i * 0.22, 0.03, out.plucks, 7));
+  // Two or three melody notes, stepping gently, with long gaps between them.
+  let t = start + 4 + Math.random() * 2;
+  let last = 1 + Math.floor(Math.random() * 4);
+  const notes = 2 + Math.floor(Math.random() * 2);
+  for (let i = 0; i < notes && t < start + CHORD_SECONDS - 2; i++) {
+    last = Math.max(0, Math.min(SCALE.length - 1, last + [-1, 1, -2, 2][Math.floor(Math.random() * 4)]));
+    key(out, midi(SCALE[last]), t, 0.028 + Math.random() * 0.008);
+    t += 3 + Math.random() * 2.5;
   }
-  // Near the villages, a warm plucked pattern like someone playing on a doorstep.
-  const low = [...chord].sort((a, b) => a - b).slice(0, 5);
-  const beat = CHORD_SECONDS / 14;
-  for (let i = 0; i < 14; i++) {
-    if (i % 7 === 6) continue;
-    const note = low[[0, 2, 3, 1, 4, 2][i % 6]];
-    pluck(out, midi(note + (note < 50 ? 12 : 0)), start + i * beat + Math.random() * 0.03, 0.05 + Math.random() * 0.018, out.warm);
-  }
-  // High up, thin glassy tones hang over everything.
-  for (const note of [chord[3] + 12, chord[5]]) {
-    padNote(out, midi(note), start + 2 + Math.random() * 4, CHORD_SECONDS - 2, 0.012, out.high);
-  }
+  // Near the villages, the same chord is played again softly halfway through, like someone
+  // playing indoors.
+  chord.slice(1, 4).forEach((note, i) => key(out, midi(note), start + CHORD_SECONDS / 2 + i * 0.3, 0.022, out.warm, 6));
+  // High up, a single faint note an octave above hangs in the air.
+  padNote(out, midi(chord[chord.length - 1] + 12), start + 3, CHORD_SECONDS - 3, 0.008, out.high);
 }
 
 function playBounce(out: Output, at: number) {
@@ -455,15 +440,15 @@ function applyScene(ctx: BaseAudioContext, beds: Beds, mix: Mix, s: Scene) {
   set(beds.falls.gain, s.falls);
   set(beds.rain.gain, s.rain, 0.8);
 
-  set(mix.padTrim.frequency, 30 + s.high * 340, 1.6);
-  set(mix.padLevel.gain, 1 - s.high * 0.42, 1.6);
+  set(mix.padTrim.frequency, 30, 1.6);
+  set(mix.padLevel.gain, 1 - s.high * 0.3, 1.6);
   set(mix.pluckLevel.gain, 1 - s.village * 0.3, 1.6);
-  set(mix.warmLevel.gain, s.village, 1.6);
+  set(mix.warmLevel.gain, s.village * 0.8, 1.6);
   set(mix.highLevel.gain, s.high, 1.6);
-  set(mix.wet.gain, 0.5 + s.high * 0.25 + s.cave * 0.3, 1.6);
+  set(mix.wet.gain, 0.28 + s.high * 0.12 + s.cave * 0.25, 1.6);
   set(mix.sfxRoom.gain, 0.18 + s.cave * 0.55, 0.5);
   set(mix.musicTone.frequency, s.cave > 0.5 ? 950 : 3200, 0.8);
-  set(mix.musicLevel.gain, 0.8 * (1 - s.night * 0.22), 2);
+  set(mix.musicLevel.gain, 0.6 * (1 - s.night * 0.22), 2);
 }
 
 export const SILENT: Scene = { wind: 0, windTone: 400, rush: 0, spray: 0, falls: 0, rain: 0, high: 0, village: 0, cave: 0, night: 0 };
