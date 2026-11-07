@@ -34,13 +34,17 @@ Flying works like a bird's, but you can never fall out of the sky.
 - **Mountains** to start from or climb to
 - **Homes** to deliver between
 
-## Backstory (draft)
+## Backstory
 
-High in the sea-cliff villages, the wind has always been strong. For generations, the people who lived there sewed wings to read it, the way sailors read the sea. Then one spring, nobody remembers quite how, the wind began to answer. It lifted the wings and didn't let go.
+The island's water carries the **lume**, a faint glow you can see in the river after dark. It was there long before anyone lived here.
 
-Since then, the villagers have flown. Not as a gift to earn or a power to fight over, just as a part of daily life. Children learn to fly before they learn to swim. Neighbours carry bread, letters and lemons from one rooftop to the next, because it's nice and because they were going that way anyway.
+The first families arrived by boat, running from storms. They drank from the falls and woke up feeling lighter, and their children, raised on that water, leapt from rock to rock while the wind tugged at their sleeves as if it knew them. The old saying goes that the lume doesn't make you fly, it makes you listen: the wind was always talking, and the water taught people to hear it.
 
-Nobody has to do anything. The wind is always there, and so is the sky.
+The cliff villages sewed sails, and for the spring festival they sewed wings, just for show. Then a girl called Amaranta jumped from the Serravento cliffs in a pair and didn't come down until supper. Generations followed, first gliding, then hopping between rooftops, then truly flying. The tinkerers of Serravento later built the wing packs that the wings fold into. The lume runs strongest in the caves behind the falls, where the crystals have been drinking it for a thousand years.
+
+Everyone keeps an old promise: **what the island gives freely, we give freely**. That means the water, the wind and our help. People carry things for each other without pay, and whatever you learn in the sky, whether it's a new current, a hidden cave or a better way to land, you bring home and teach. Shipwrecked sailors get water and wings like anyone born here, and the young bring the sky in stories to those too old to fly.
+
+Villagers tell this story a piece at a time, one piece per conversation, in order. The lines live in `game/lore.ts`.
 
 ## What's on the island now
 
@@ -51,7 +55,7 @@ Everything here is optional. There are no timers, scores or ways to fail.
 | Key | Action |
 |---|---|
 | E | Land on the ground or a rooftop |
-| W, Shift or ↓ | Take off again |
+| W, S, A, D (on the ground) | Walk, step back and turn. Shift, Space or ↓ takes off |
 | P | Photo mode. Arrows move the camera, W and S zoom, Enter takes the photo |
 | Q | Pack the wings away and drop, or open them again |
 | F | Talk to someone you've landed beside |
@@ -59,7 +63,7 @@ Everything here is optional. There are no timers, scores or ways to fail.
 
 ### Deliveries
 
-A golden glow marks someone holding a parcel, with a golden circle on the ground around them. Land inside the circle and talk to them (F). They tell you what it is and who it's for, and you can say yes or not today. Once you've taken it, it stays with you: you can stop and rest anywhere, but you can't leave it somewhere. Follow the golden bird, land in the circle by the person waiting, and hand it over. A lantern then goes up by their door.
+A golden glow marks someone holding a parcel, with a golden circle on the ground around them. Land nearby, walk up into the circle and talk to them (F). They share a piece of the island's story, then tell you what it is and who it's for, and you can say yes or not today. Once you've taken it, it stays with you: you can stop and rest anywhere, but you can't leave it somewhere. Follow the golden bird, land near the person waiting, walk up and hand it over. They tell you a little more of the story too. A lantern then goes up by their door.
 
 ### Wings
 

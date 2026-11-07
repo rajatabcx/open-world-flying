@@ -75,7 +75,7 @@ function Beacons() {
 /** A glowing circle on the ground around whoever you could talk to. Land inside it. */
 function TalkRings() {
   const ref = useRef<InstancedMesh>(null!);
-  const geometry = useMemo(() => new RingGeometry(TALK_REACH - 5, TALK_REACH - 3.5, 64).rotateX(-Math.PI / 2), []);
+  const geometry = useMemo(() => new RingGeometry(TALK_REACH - 1.3, TALK_REACH - 0.4, 48).rotateX(-Math.PI / 2), []);
   useFrame((state) => {
     const t = state.clock.elapsedTime;
     let i = 0;

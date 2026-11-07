@@ -314,9 +314,9 @@ export default function Game() {
             <p><b className="font-semibold">W</b> flap forward · let go to glide · <b className="font-semibold">S</b> brake to a hover</p>
             <p><b className="font-semibold">Shift</b> boost · or drag the mouse to steer</p>
             <p><b className="font-semibold">Q</b> pack the wings away and drop · any flying key throws them open again</p>
-            <p><b className="font-semibold">E</b> land, then <b className="font-semibold">W</b> to fly again · <b className="font-semibold">F</b> talk to someone beside you</p>
+            <p><b className="font-semibold">E</b> land · on the ground <b className="font-semibold">W</b> walks, <b className="font-semibold">Shift</b> takes off · <b className="font-semibold">F</b> talk to someone</p>
             <p><b className="font-semibold">P</b> photo · <b className="font-semibold">T</b> move the day along · <b className="font-semibold">M</b> sound · <b className="font-semibold">H</b> show or hide this</p>
-            <p className="mt-1 text-white/80">See a golden glow? Someone has a parcel. Land in their circle and talk to them, if you feel like carrying it.</p>
+            <p className="mt-1 text-white/80">See a golden glow? Someone has a parcel. Land nearby, walk up and talk to them, if you feel like carrying it.</p>
           </div>
           {warning && !talk && (
             <div role="status" className="pointer-events-none absolute inset-x-0 top-1/3 flex justify-center">
@@ -330,7 +330,7 @@ export default function Game() {
               <p className="text-xs uppercase tracking-widest text-amber-200/90">
                 {talk.person.name} · {VILLAGE_NAMES[talk.person.village]}
               </p>
-              <p className="mt-1.5 text-base leading-6">&ldquo;{talk.line}&rdquo;</p>
+              <p className="mt-1.5 text-base leading-6">&ldquo;{talk.pages[talk.page]}&rdquo;</p>
               <div className="mt-3 flex gap-2">
                 <button
                   onClick={() => {
@@ -339,7 +339,7 @@ export default function Game() {
                   }}
                   className="rounded-full bg-white px-5 py-2 text-sm font-medium text-slate-900"
                 >
-                  {talk.kind === "ask" ? "I'll take it (Enter)" : "Hand it over (Enter)"}
+                  {talk.page < talk.pages.length - 1 ? "Go on (Enter)" : talk.kind === "ask" ? "I'll take it (Enter)" : "Hand it over (Enter)"}
                 </button>
                 {talk.kind === "ask" && (
                   <button
@@ -353,7 +353,7 @@ export default function Game() {
                   </button>
                 )}
               </div>
-              {talk.kind === "ask" && <p className="mt-2.5 text-xs text-white/70">Once you take it, it stays with you until it&apos;s delivered.</p>}
+              {talk.kind === "ask" && talk.page === talk.pages.length - 1 && <p className="mt-2.5 text-xs text-white/70">Once you take it, it stays with you until it&apos;s delivered.</p>}
             </div>
           )}
           {caption && !talk && (

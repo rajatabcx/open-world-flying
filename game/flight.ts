@@ -73,6 +73,8 @@ export const flight = {
   busy: false,
   /** 1 with wings out, 0 with them packed into the wing pack. */
   wings: 0,
+  /** Walking speed on the ground, backwards when negative. */
+  walk: 0,
 };
 
 /** Trees that were just hit, for the leaves and the shaking to pick up. */
@@ -118,6 +120,7 @@ function settle(top: number) {
   flight.hovering = false;
   flight.folded = false;
   flight.launching = 0;
+  flight.walk = 0;
   flight.vy = 0;
   flight.speed = 0;
   flight.pitch = 0;
@@ -162,6 +165,13 @@ export function isSitting() {
   return flight.resting && flight.restTime > 6 && !flight.busy && flight.launching <= 0;
 }
 
+const WALK = 3.4;
+const WALK_BACK = 1.6;
+
+/**
+ * On your feet: W or the up arrow walks, S steps back, and left and right turn.
+ * Shift, Space or the down arrow throws the wings open and takes off again.
+ */
 function stepRest(dt: number) {
   flight.mode = "rest";
   flight.speed = 0;
@@ -169,12 +179,22 @@ function stepRest(dt: number) {
   flight.wind = damp(flight.wind, 0, 2, dt);
   flight.pitch = damp(flight.pitch, 0, 4, dt);
   flight.roll = damp(flight.roll, 0, 4, dt);
-  flight.turn = damp(flight.turn, flight.busy ? 0 : input.x, 3, dt);
-  flight.yaw -= flight.turn * 0.6 * dt;
+  const free = !flight.busy && flight.launching <= 0;
+  flight.turn = damp(flight.turn, free ? input.x : 0, 6, dt);
+  flight.yaw -= flight.turn * 1.7 * dt;
+  flight.dir.set(-Math.sin(flight.yaw), 0, -Math.cos(flight.yaw));
   flight.restTime += dt;
   flight.shaken = Math.max(0, flight.shaken - dt * 1.4);
+
+  const forward = input.throttle > 0 || input.y < -0.2 ? 1 : input.throttle < 0 ? -1 : 0;
+  const want = free && flight.restTime > 0.4 ? (forward > 0 ? WALK : forward < 0 ? -WALK_BACK : 0) : 0;
+  flight.walk = damp(flight.walk, want, 8, dt);
+  if (Math.abs(flight.walk) > 0.05) {
+    flight.restTime = 0.5;
+    stepWalk(flight.walk * dt);
+  }
   // Land standing, and after a while sit down to take in the view.
-  flight.pos.y = damp(flight.pos.y, flight.restY + (isSitting() ? 0.36 : 1.5), 2.4, dt);
+  flight.pos.y = damp(flight.pos.y, flight.restY + (isSitting() ? 0.36 : 1.5), Math.abs(flight.walk) > 0.05 ? 14 : 2.4, dt);
   // Taking off, the wings unpack first, then one strong beat lifts you off your feet.
   if (flight.launching > 0) {
     flight.launching -= dt;
@@ -182,6 +202,7 @@ function stepRest(dt: number) {
     if (flight.launching <= 0) {
       flight.resting = false;
       flight.hovering = false;
+      flight.walk = 0;
       flight.speed = 18;
       flight.impulse.set(0, 19, 0);
       wingBeatSound(1);
@@ -189,7 +210,31 @@ function stepRest(dt: number) {
     return;
   }
   flight.wings = damp(flight.wings, 0, 5, dt);
-  if (!flight.busy && flight.restTime > 0.6 && (input.throttle > 0 || input.boost || input.y > 0.2)) flight.launching = 0.45;
+  if (!flight.busy && flight.restTime > 0.6 && (input.boost || input.y > 0.2)) flight.launching = 0.45;
+}
+
+/** One step along the ground. Walls, steep rock, trees and water stop you, and you slide along them. */
+function stepWalk(distance: number) {
+  const dx = -Math.sin(flight.yaw) * distance;
+  const dz = -Math.cos(flight.yaw) * distance;
+  if (tryStep(dx, dz)) return;
+  // Blocked straight ahead, so try sliding along whatever's in the way.
+  if (Math.abs(dx) > Math.abs(dz)) {
+    if (!tryStep(dx, 0)) tryStep(0, dz);
+  } else if (!tryStep(0, dz)) tryStep(dx, 0);
+}
+
+function tryStep(dx: number, dz: number) {
+  const x = flight.pos.x + dx;
+  const z = flight.pos.z + dz;
+  const top = standHeight(x, z);
+  if (top === null) return false;
+  if (top - flight.restY > Math.max(0.6, Math.hypot(dx, dz) * 1.3)) return false;
+  if (treeAt(x, top + 1.5, z, 0.8)) return false;
+  flight.pos.x = x;
+  flight.pos.z = z;
+  flight.restY = top;
+  return true;
 }
 
 /** Wings packed away: you fall, and only the faintest steering is left. */

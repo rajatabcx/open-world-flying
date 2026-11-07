@@ -3,16 +3,16 @@
 import { useGLTF } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { AdditiveBlending, Bone, Box3, BoxGeometry, BufferGeometry, Color, CylinderGeometry, DirectionalLight, DoubleSide, Euler, Float32BufferAttribute, Group, Mesh, MeshDepthMaterial, MeshStandardMaterial, PerspectiveCamera, Quaternion, RGBADepthPacking, ShaderMaterial, Vector3 } from "three";
+import { AdditiveBlending, AnimationMixer, Bone, Box3, BufferGeometry, CapsuleGeometry, Color, CylinderGeometry, LoopOnce, SphereGeometry, TorusGeometry, DirectionalLight, DoubleSide, Euler, Float32BufferAttribute, Group, Mesh, MeshDepthMaterial, MeshStandardMaterial, PerspectiveCamera, Quaternion, RGBADepthPacking, ShaderMaterial, Vector3 } from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { BOOST, CRUISE, flight, isSitting, stepFlight, type FlightMode } from "./flight";
 import { wingBeatSound } from "./audio";
-import { stepErrands } from "./errands";
+import { errands, stepErrands } from "./errands";
 import { updateSoundscape } from "./soundscape";
 import { sky, stepDay } from "./time";
 import { stepWeather } from "./weather";
 import { attachInput, input } from "./input";
-import { bindUniforms, shared } from "./shared";
+import { bindUniforms, glowTexture, paint, shared } from "./shared";
 import { photoView } from "./photo";
 import { caveAt, heightAt } from "./terrain";
 import { SUN } from "./world";
@@ -272,14 +272,26 @@ const WING_MODES: Record<FlightMode, WingShape> = {
   fall: { hz: 0.1, amp: 0, sweep: 1.4, droop: 0.1, spread: 0, span: 0.5, chord: 0.6, tint: "#4a5f78", tintAmount: 0.5, glow: 0 },
 };
 
-/** A slim wing pack on the back. The wings slide out of it to fly, and back in to land or drop. */
+/**
+ * The wing pack: two smooth pods along the shoulder blades that the wings fold into, joined
+ * by a spine with copper bands, and a small amber stone of lume set in the middle.
+ */
 function buildPack() {
-  const shell = new BoxGeometry(0.62, 0.2, 0.95).translate(0, 0.27, -0.18);
-  const ridge = new BoxGeometry(0.16, 0.12, 0.8).translate(0, 0.4, -0.2);
-  const strapA = new BoxGeometry(0.66, 0.06, 0.09).translate(0, 0.17, -0.5);
-  const strapB = new BoxGeometry(0.66, 0.06, 0.09).translate(0, 0.17, 0.1);
-  const vents = [-1, 1].map((side) => new CylinderGeometry(0.1, 0.1, 0.18, 12).rotateZ(Math.PI / 2).translate(side * 0.31, 0.3, -0.42));
-  return mergeGeometries([shell, ridge, strapA, strapB, ...vents].map((g) => g.toNonIndexed()))!;
+  const parts: BufferGeometry[] = [];
+  for (const side of [-1, 1]) {
+    const pod = new SphereGeometry(1, 28, 18).scale(0.105, 0.075, 0.44).rotateY(side * 0.1).translate(side * 0.135, 0.29, -0.34);
+    parts.push(paint(pod, "#efe2cc"));
+    const lip = new TorusGeometry(0.07, 0.016, 10, 28).rotateY(Math.PI / 2).scale(1, 0.8, 1).translate(side * 0.215, 0.29, -0.42);
+    parts.push(paint(lip, "#b8693d"));
+  }
+  const spine = new CapsuleGeometry(0.06, 0.6, 8, 20).rotateX(Math.PI / 2).scale(1, 0.8, 1).translate(0, 0.31, -0.27);
+  parts.push(paint(spine, "#e4d3b8"));
+  for (const z of [-0.5, 0.0]) {
+    parts.push(paint(new TorusGeometry(0.062, 0.014, 8, 24).scale(1, 0.8, 1).translate(0, 0.31, z), "#b8693d"));
+  }
+  const setting = new CylinderGeometry(0.055, 0.068, 0.04, 20).translate(0, 0.365, -0.27);
+  parts.push(paint(setting, "#b8693d"));
+  return mergeGeometries(parts)!;
 }
 const wingNow = { hz: 0.7, amp: 0.26, sweep: 0.1, droop: -0.03, spread: 0, span: 1, chord: 1, tintAmount: 0, glow: 0 };
 const wingTint = new Color("#e8683f");
@@ -316,7 +328,25 @@ const lookNow = new Vector3();
 const camPos = new Vector3();
 
 export function Hero({ lightRef }: { lightRef: React.RefObject<DirectionalLight | null> }) {
-  const { scene } = useGLTF("/models/character.glb");
+  const { scene, animations } = useGLTF("/models/character.glb");
+  const glow = useMemo(() => glowTexture(), []);
+  // The model's own walk, faded in while you walk about on the ground, and a small
+  // gesture when you take or hand over a parcel.
+  const moves = useMemo(() => {
+    const mixer = new AnimationMixer(scene);
+    const clip = (name: string) => animations.find((a) => a.name.endsWith(`|${name}`));
+    const walkClip = clip("Walk");
+    const giveClip = clip("Interact");
+    const walk = walkClip ? mixer.clipAction(walkClip) : null;
+    const give = giveClip ? mixer.clipAction(giveClip) : null;
+    if (give) {
+      give.setLoop(LoopOnce, 1);
+      give.clampWhenFinished = false;
+    }
+    return { mixer, walk, give };
+  }, [scene, animations]);
+  const moving = useRef({ weight: 0, lastGesture: 0 });
+  const posed = useRef(false);
   const root = useRef<Group>(null!);
   const body = useRef<Group>(null!);
   const rightWing = useRef<Group>(null!);
@@ -437,7 +467,27 @@ export function Hero({ lightRef }: { lightRef: React.RefObject<DirectionalLight 
     upright.current += ((resting ? Math.PI / 2 : hover * 1.32) - upright.current) * (1 - Math.exp(-3 * dt));
     // Knees bend and arms drop to sit down, and stretch out again for flight.
     sitting.current += ((isSitting() ? 1 : 0) - sitting.current) * (1 - Math.exp(-3.5 * dt));
-    for (const pose of poses.current) pose.bone.quaternion.slerpQuaternions(pose.rest, pose.bent, sitting.current);
+    // Walking plays the model's own walk cycle, sped up or slowed to match your steps.
+    const walking = flight.resting ? Math.min(1, Math.abs(flight.walk) / 2) : 0;
+    const move = moving.current;
+    move.weight += (walking - move.weight) * (1 - Math.exp(-8 * dt));
+    if (moves.walk) {
+      if (move.weight > 0.01) {
+        if (!moves.walk.isRunning()) moves.walk.play();
+        moves.walk.setEffectiveWeight(move.weight);
+        moves.walk.setEffectiveTimeScale(Math.sign(flight.walk || 1) * Math.max(0.6, Math.abs(flight.walk) / 3));
+      } else if (moves.walk.isRunning()) moves.walk.stop();
+    }
+    if (moves.give && errands.gesture > move.lastGesture) {
+      move.lastGesture = errands.gesture;
+      moves.give.reset().setEffectiveWeight(1).fadeIn(0.2).play();
+    }
+    moves.mixer.update(dt);
+    // The sitting pose takes over only when it's in use, so it never fights the walk.
+    if (sitting.current > 0.002 || posed.current) {
+      for (const pose of poses.current) pose.bone.quaternion.slerpQuaternions(pose.rest, pose.bent, sitting.current);
+      posed.current = sitting.current > 0.002;
+    }
     body.current.rotation.x = upright.current;
     body.current.rotation.z = Math.sin(time * 26) * flight.shaken * flight.shaken * 0.32;
     // The body rises on each downstroke, which sells the wings doing the lifting.
@@ -460,17 +510,24 @@ export function Hero({ lightRef }: { lightRef: React.RefObject<DirectionalLight 
       camPos.set(flight.pos.x + Math.sin(a) * flat, flight.pos.y + Math.sin(photoView.lift) * photoView.away, flight.pos.z + Math.cos(a) * flat);
       camOffset.copy(camPos).sub(flight.pos);
       lookTarget.copy(flight.pos);
-    } else if (flight.resting && flight.restTime > 1.5) {
+    } else if (flight.resting && flight.restTime > 3) {
       // Sitting still, the camera slowly drifts out to take in the view.
-      const out = Math.min(1, (flight.restTime - 1.5) / 14);
+      const out = Math.min(1, (flight.restTime - 3) / 14);
       const eased = out * out * (3 - 2 * out);
-      const a = flight.yaw + 0.5 + (flight.restTime - 1.5) * 0.035;
+      const a = flight.yaw + 0.5 + (flight.restTime - 3) * 0.035;
       const away = 12 + eased * 44;
       wantOffset.set(Math.sin(a) * away, 4.5 + eased * 19, Math.cos(a) * away);
       camOffset.lerp(wantOffset, 1 - Math.exp(-1.4 * dt));
       camPos.copy(flight.pos).add(camOffset);
       lookTarget.copy(flight.pos);
       lookTarget.y += 1 + eased * 8;
+    } else if (flight.resting) {
+      // On foot, the camera comes in close over your shoulder, clear of the houses.
+      wantOffset.set(Math.sin(flight.yaw) * 8.5, 3.4, Math.cos(flight.yaw) * 8.5);
+      camOffset.lerp(wantOffset, 1 - Math.exp(-3 * dt));
+      camPos.copy(flight.pos).add(camOffset);
+      lookTarget.copy(flight.pos).addScaledVector(flight.dir, 5);
+      lookTarget.y += 1;
     } else if (flight.flying) {
       const away = 16 + flight.boost * 5;
       // Stay a steady distance back, even in a steep climb or dive.
@@ -525,8 +582,15 @@ export function Hero({ lightRef }: { lightRef: React.RefObject<DirectionalLight 
             </group>
           </group>
           <mesh geometry={pack} castShadow>
-            <meshStandardMaterial color="#5b6470" roughness={0.6} metalness={0.25} />
+            <meshStandardMaterial vertexColors roughness={0.42} metalness={0.15} />
           </mesh>
+          <mesh position={[0, 0.39, -0.27]} scale={[1, 0.6, 1]}>
+            <sphereGeometry args={[0.045, 16, 10]} />
+            <meshBasicMaterial color="#ffcf6e" toneMapped={false} />
+          </mesh>
+          <sprite position={[0, 0.41, -0.27]} scale={[0.36, 0.36, 1]}>
+            <spriteMaterial map={glow} color="#ffc861" transparent opacity={0.6} depthWrite={false} blending={AdditiveBlending} />
+          </sprite>
           <group ref={rightWing} position={[0.16, 0.3, -0.42]}>
             <mesh geometry={wing} material={right.material} customDepthMaterial={right.depth} castShadow frustumCulled={false} />
           </group>
